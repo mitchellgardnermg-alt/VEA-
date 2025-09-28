@@ -102,9 +102,29 @@ app.get('/', (req, res) => {
     endpoints: {
       'POST /convert': 'Upload and convert video files',
       'GET /download/:filename': 'Download converted files',
-      'GET /health': 'Health check'
+      'GET /health': 'Health check',
+      'GET /test-ffmpeg': 'Test FFmpeg installation'
     },
     status: 'running'
+  });
+});
+
+// Test FFmpeg endpoint
+app.get('/test-ffmpeg', (req, res) => {
+  exec('ffmpeg -version', (error, stdout, stderr) => {
+    if (error) {
+      res.json({
+        ffmpeg: 'NOT FOUND',
+        error: error.message,
+        stderr: stderr
+      });
+    } else {
+      res.json({
+        ffmpeg: 'FOUND',
+        version: stdout.split('\n')[0],
+        fullOutput: stdout
+      });
+    }
   });
 });
 
@@ -123,7 +143,10 @@ app.post('/convert', upload.single('video'), async (req, res) => {
     console.log(`Converting ${req.file.originalname} to MP4...`);
 
     // Convert video using FFmpeg with enhanced settings
+    let conversionSuccess = false;
+    
     try {
+      console.log('Starting conversion with fluent-ffmpeg...');
       await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
           .outputOptions([
@@ -153,6 +176,7 @@ app.post('/convert', upload.single('video'), async (req, res) => {
           })
           .on('end', () => {
             console.log('Conversion completed successfully');
+            conversionSuccess = true;
             resolve();
           })
           .on('error', (err) => {
@@ -164,25 +188,36 @@ app.post('/convert', upload.single('video'), async (req, res) => {
       });
     } catch (ffmpegError) {
       console.log('Fluent-FFmpeg failed, trying direct FFmpeg command...');
+      console.error('Fluent-FFmpeg error:', ffmpegError);
       
       // Fallback to direct FFmpeg command
-      await new Promise((resolve, reject) => {
-        const ffmpegCommand = `ffmpeg -i "${inputPath}" -c:v libx264 -c:a aac -preset fast -crf 23 -movflags +faststart -pix_fmt yuv420p -profile:v baseline -level 3.0 -maxrate 2M -bufsize 4M -f mp4 "${tempPath}"`;
-        
-        console.log('Running direct FFmpeg command:', ffmpegCommand);
-        
-        exec(ffmpegCommand, (error, stdout, stderr) => {
-          if (error) {
-            console.error('Direct FFmpeg command failed:', error);
-            console.error('Stderr:', stderr);
-            reject(error);
-          } else {
-            console.log('Direct FFmpeg command succeeded');
-            console.log('Stdout:', stdout);
-            resolve();
-          }
+      try {
+        await new Promise((resolve, reject) => {
+          const ffmpegCommand = `ffmpeg -i "${inputPath}" -c:v libx264 -c:a aac -preset fast -crf 23 -movflags +faststart -pix_fmt yuv420p -profile:v baseline -level 3.0 -maxrate 2M -bufsize 4M -f mp4 "${tempPath}"`;
+          
+          console.log('Running direct FFmpeg command:', ffmpegCommand);
+          
+          exec(ffmpegCommand, (error, stdout, stderr) => {
+            if (error) {
+              console.error('Direct FFmpeg command failed:', error);
+              console.error('Stderr:', stderr);
+              reject(error);
+            } else {
+              console.log('Direct FFmpeg command succeeded');
+              console.log('Stdout:', stdout);
+              conversionSuccess = true;
+              resolve();
+            }
+          });
         });
-      });
+      } catch (directError) {
+        console.error('Both conversion methods failed:', directError);
+        throw new Error(`Conversion failed: ${directError.message}`);
+      }
+    }
+    
+    if (!conversionSuccess) {
+      throw new Error('Conversion failed - no successful conversion method');
     }
 
     // Check if temp file exists before moving
