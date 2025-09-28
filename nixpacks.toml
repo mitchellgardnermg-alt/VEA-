@@ -1,11 +1,1 @@
-[phases.setup]
-nixPkgs = ["ffmpeg"]
-
-[phases.install]
-cmds = ["npm install"]
-
-[phases.build]
-cmds = ["npm run build || echo 'No build script found'"]
-
-[start]
-cmd = "node server.js"
+packages = ["ffmpeg"]
