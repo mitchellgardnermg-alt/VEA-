@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs-extra');
 const path = require('path');
+const { exec } = require('child_process');
 
 const app = express();
 
@@ -14,6 +15,24 @@ const app = express();
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;
+
+// Check FFmpeg availability
+function checkFFmpeg() {
+  return new Promise((resolve) => {
+    exec('ffmpeg -version', (error, stdout, stderr) => {
+      if (error) {
+        console.error('FFmpeg not found:', error.message);
+        resolve(false);
+      } else {
+        console.log('FFmpeg found:', stdout.split('\n')[0]);
+        resolve(true);
+      }
+    });
+  });
+}
+
+// Initialize FFmpeg check
+checkFFmpeg();
 
 // Security middleware
 app.use(helmet());
@@ -104,49 +123,85 @@ app.post('/convert', upload.single('video'), async (req, res) => {
     console.log(`Converting ${req.file.originalname} to MP4...`);
 
     // Convert video using FFmpeg with enhanced settings
-    await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        .outputOptions([
-          '-c:v libx264',           // Use H.264 codec for video
-          '-c:a aac',              // Use AAC codec for audio
-          '-preset fast',          // Encoding speed vs compression tradeoff
-          '-crf 23',              // Constant rate factor (quality)
-          '-movflags +faststart',  // Optimize for web streaming
-          '-pix_fmt yuv420p',     // Ensure compatibility
-          '-profile:v baseline',  // Use baseline profile for compatibility
-          '-level 3.0',           // Set H.264 level
-          '-maxrate 2M',          // Maximum bitrate
-          '-bufsize 4M',          // Buffer size
-          '-f mp4'                // Force MP4 format
-        ])
-        .output(tempPath)
-        .on('start', (commandLine) => {
-          console.log('FFmpeg process started:', commandLine);
-          console.log(`Input file: ${inputPath}`);
-          console.log(`Output file: ${tempPath}`);
-        })
-        .on('progress', (progress) => {
-          console.log(`Processing: ${Math.round(progress.percent || 0)}% done`);
-          if (progress.timemark) {
-            console.log(`Time: ${progress.timemark}`);
+    try {
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .outputOptions([
+            '-c:v libx264',           // Use H.264 codec for video
+            '-c:a aac',              // Use AAC codec for audio
+            '-preset fast',          // Encoding speed vs compression tradeoff
+            '-crf 23',              // Constant rate factor (quality)
+            '-movflags +faststart',  // Optimize for web streaming
+            '-pix_fmt yuv420p',     // Ensure compatibility
+            '-profile:v baseline',  // Use baseline profile for compatibility
+            '-level 3.0',           // Set H.264 level
+            '-maxrate 2M',          // Maximum bitrate
+            '-bufsize 4M',          // Buffer size
+            '-f mp4'                // Force MP4 format
+          ])
+          .output(tempPath)
+          .on('start', (commandLine) => {
+            console.log('FFmpeg process started:', commandLine);
+            console.log(`Input file: ${inputPath}`);
+            console.log(`Output file: ${tempPath}`);
+          })
+          .on('progress', (progress) => {
+            console.log(`Processing: ${Math.round(progress.percent || 0)}% done`);
+            if (progress.timemark) {
+              console.log(`Time: ${progress.timemark}`);
+            }
+          })
+          .on('end', () => {
+            console.log('Conversion completed successfully');
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('FFmpeg error:', err);
+            console.error('Error message:', err.message);
+            reject(err);
+          })
+          .run();
+      });
+    } catch (ffmpegError) {
+      console.log('Fluent-FFmpeg failed, trying direct FFmpeg command...');
+      
+      // Fallback to direct FFmpeg command
+      await new Promise((resolve, reject) => {
+        const ffmpegCommand = `ffmpeg -i "${inputPath}" -c:v libx264 -c:a aac -preset fast -crf 23 -movflags +faststart -pix_fmt yuv420p -profile:v baseline -level 3.0 -maxrate 2M -bufsize 4M -f mp4 "${tempPath}"`;
+        
+        console.log('Running direct FFmpeg command:', ffmpegCommand);
+        
+        exec(ffmpegCommand, (error, stdout, stderr) => {
+          if (error) {
+            console.error('Direct FFmpeg command failed:', error);
+            console.error('Stderr:', stderr);
+            reject(error);
+          } else {
+            console.log('Direct FFmpeg command succeeded');
+            console.log('Stdout:', stdout);
+            resolve();
           }
-        })
-        .on('end', () => {
-          console.log('Conversion completed successfully');
-          resolve();
-        })
-        .on('error', (err) => {
-          console.error('FFmpeg error:', err);
-          console.error('Error message:', err.message);
-          reject(err);
-        })
-        .run();
-    });
+        });
+      });
+    }
 
     // Check if temp file exists before moving
     if (await fs.pathExists(tempPath)) {
       const tempStats = await fs.stat(tempPath);
       console.log(`Temp file size: ${tempStats.size} bytes`);
+      
+      // Verify the file is actually MP4 by checking file header
+      const fileBuffer = await fs.readFile(tempPath, { start: 0, end: 8 });
+      const fileHeader = fileBuffer.toString('hex');
+      console.log(`File header: ${fileHeader}`);
+      
+      // Check for MP4 signature (ftyp box)
+      if (fileHeader.includes('66747970') || fileHeader.includes('6d6f6f76')) {
+        console.log('✅ File appears to be MP4 format');
+      } else {
+        console.log('⚠️ File may not be MP4 format, header:', fileHeader);
+      }
+      
       console.log(`Moving file from ${tempPath} to ${outputPath}`);
       await fs.move(tempPath, outputPath);
       console.log('File moved successfully');
