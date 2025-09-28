@@ -66,7 +66,7 @@
     <div class="upload-area" id="uploadArea">
         <p>Drag and drop a WebM video file here, or click to select</p>
         <input type="file" id="fileInput" accept="video/*" style="display: none;">
-        <button onclick="document.getElementById('fileInput').click()">Select Video File</button>
+        <button id="selectBtn">Select Video File</button>
     </div>
     
     <div>
@@ -91,11 +91,17 @@
         
         // File selection handling
         document.getElementById('fileInput').addEventListener('change', function(e) {
+            log('File input changed, files count: ' + e.target.files.length);
             if (e.target.files.length > 0) {
                 selectedFile = e.target.files[0];
                 log(`Selected file: ${selectedFile.name} (${selectedFile.size} bytes, ${selectedFile.type})`);
                 document.getElementById('convertBtn').disabled = false;
             }
+        });
+        
+        // Select button handler
+        document.getElementById('selectBtn').addEventListener('click', function() {
+            document.getElementById('fileInput').click();
         });
         
         // Drag and drop handling
@@ -132,6 +138,10 @@
         // Button event listeners
         document.getElementById('convertBtn').addEventListener('click', convertVideo);
         document.getElementById('downloadBtn').addEventListener('click', downloadConverted);
+        
+        // Test that page loaded
+        log('Test page loaded successfully');
+        log('Click "Select Video File" button to choose a WebM file');
         
         async function convertVideo() {
             if (!selectedFile) {
