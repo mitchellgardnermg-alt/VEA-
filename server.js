@@ -75,6 +75,20 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Video Encoding API',
+    version: '1.0.0',
+    endpoints: {
+      'POST /convert': 'Upload and convert video files',
+      'GET /download/:filename': 'Download converted files',
+      'GET /health': 'Health check'
+    },
+    status: 'running'
+  });
+});
+
 // Convert WebM to MP4 endpoint
 app.post('/convert', upload.single('video'), async (req, res) => {
   try {
