@@ -38,6 +38,9 @@ checkFFmpeg();
 app.use(helmet());
 app.use(cors());
 
+// Serve static files
+app.use(express.static(__dirname));
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
