@@ -70,8 +70,8 @@
     </div>
     
     <div>
-        <button id="convertBtn" onclick="convertVideo()" disabled>Convert to MP4</button>
-        <button id="downloadBtn" onclick="downloadConverted()" disabled>Download Converted</button>
+        <button id="convertBtn" disabled>Convert to MP4</button>
+        <button id="downloadBtn" disabled>Download Converted</button>
     </div>
     
     <div class="log" id="log"></div>
@@ -101,6 +101,13 @@
         // Drag and drop handling
         const uploadArea = document.getElementById('uploadArea');
         
+        // Add click handler for upload area
+        uploadArea.addEventListener('click', function(e) {
+            if (e.target === uploadArea || e.target.tagName === 'P') {
+                document.getElementById('fileInput').click();
+            }
+        });
+        
         uploadArea.addEventListener('dragover', function(e) {
             e.preventDefault();
             uploadArea.classList.add('dragover');
@@ -121,6 +128,10 @@
                 document.getElementById('convertBtn').disabled = false;
             }
         });
+        
+        // Button event listeners
+        document.getElementById('convertBtn').addEventListener('click', convertVideo);
+        document.getElementById('downloadBtn').addEventListener('click', downloadConverted);
         
         async function convertVideo() {
             if (!selectedFile) {
