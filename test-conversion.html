@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Railway API Conversion</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success {
+            color: #28a745;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .info {
+            color: #17a2b8;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Railway API Video Conversion</h1>
+    
+    <div class="upload-area" id="uploadArea">
+        <p>Drag and drop a WebM video file here, or click to select</p>
+        <input type="file" id="fileInput" accept="video/*" style="display: none;">
+        <button onclick="document.getElementById('fileInput').click()">Select Video File</button>
+    </div>
+    
+    <div>
+        <button id="convertBtn" onclick="convertVideo()" disabled>Convert to MP4</button>
+        <button id="downloadBtn" onclick="downloadConverted()" disabled>Download Converted</button>
+    </div>
+    
+    <div class="log" id="log"></div>
+    
+    <script>
+        const API_URL = 'https://vea-production.up.railway.app';
+        let selectedFile = null;
+        let convertedFile = null;
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            logDiv.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // File selection handling
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                selectedFile = e.target.files[0];
+                log(`Selected file: ${selectedFile.name} (${selectedFile.size} bytes, ${selectedFile.type})`);
+                document.getElementById('convertBtn').disabled = false;
+            }
+        });
+        
+        // Drag and drop handling
+        const uploadArea = document.getElementById('uploadArea');
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            if (e.dataTransfer.files.length > 0) {
+                selectedFile = e.dataTransfer.files[0];
+                log(`Dropped file: ${selectedFile.name} (${selectedFile.size} bytes, ${selectedFile.type})`);
+                document.getElementById('convertBtn').disabled = false;
+            }
+        });
+        
+        async function convertVideo() {
+            if (!selectedFile) {
+                log('No file selected', 'error');
+                return;
+            }
+            
+            log('Starting conversion...', 'info');
+            document.getElementById('convertBtn').disabled = true;
+            
+            try {
+                const formData = new FormData();
+                formData.append('video', selectedFile);
+                
+                log(`Uploading to Railway API: ${API_URL}/convert`);
+                
+                const response = await fetch(`${API_URL}/convert`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const result = await response.json();
+                log(`Conversion response: ${JSON.stringify(result, null, 2)}`, 'success');
+                
+                if (result.success && result.downloadUrl) {
+                    log(`Download URL: ${API_URL}${result.downloadUrl}`);
+                    
+                    // Download the converted file
+                    const downloadResponse = await fetch(`${API_URL}${result.downloadUrl}`);
+                    if (downloadResponse.ok) {
+                        const arrayBuffer = await downloadResponse.arrayBuffer();
+                        convertedFile = new Blob([arrayBuffer], { type: 'video/mp4' });
+                        log(`Downloaded converted file: ${convertedFile.size} bytes`, 'success');
+                        document.getElementById('downloadBtn').disabled = false;
+                    } else {
+                        throw new Error('Failed to download converted file');
+                    }
+                } else {
+                    throw new Error('Conversion failed: ' + result.message);
+                }
+                
+            } catch (error) {
+                log(`Conversion error: ${error.message}`, 'error');
+            } finally {
+                document.getElementById('convertBtn').disabled = false;
+            }
+        }
+        
+        function downloadConverted() {
+            if (!convertedFile) {
+                log('No converted file available', 'error');
+                return;
+            }
+            
+            const url = URL.createObjectURL(convertedFile);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'converted.mp4';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            log('Download started', 'success');
+        }
+    </script>
+</body>
+</html>
