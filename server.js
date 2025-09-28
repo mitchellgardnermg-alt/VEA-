@@ -103,29 +103,41 @@ app.post('/convert', upload.single('video'), async (req, res) => {
 
     console.log(`Converting ${req.file.originalname} to MP4...`);
 
-    // Convert video using FFmpeg
+    // Convert video using FFmpeg with enhanced settings
     await new Promise((resolve, reject) => {
       ffmpeg(inputPath)
         .outputOptions([
-          '-c:v libx264',        // Use H.264 codec for video
-          '-c:a aac',           // Use AAC codec for audio
-          '-preset fast',       // Encoding speed vs compression tradeoff
-          '-crf 23',           // Constant rate factor (quality)
-          '-movflags +faststart' // Optimize for web streaming
+          '-c:v libx264',           // Use H.264 codec for video
+          '-c:a aac',              // Use AAC codec for audio
+          '-preset fast',          // Encoding speed vs compression tradeoff
+          '-crf 23',              // Constant rate factor (quality)
+          '-movflags +faststart',  // Optimize for web streaming
+          '-pix_fmt yuv420p',     // Ensure compatibility
+          '-profile:v baseline',  // Use baseline profile for compatibility
+          '-level 3.0',           // Set H.264 level
+          '-maxrate 2M',          // Maximum bitrate
+          '-bufsize 4M',          // Buffer size
+          '-f mp4'                // Force MP4 format
         ])
         .output(tempPath)
         .on('start', (commandLine) => {
           console.log('FFmpeg process started:', commandLine);
+          console.log(`Input file: ${inputPath}`);
+          console.log(`Output file: ${tempPath}`);
         })
         .on('progress', (progress) => {
-          console.log(`Processing: ${progress.percent}% done`);
+          console.log(`Processing: ${Math.round(progress.percent || 0)}% done`);
+          if (progress.timemark) {
+            console.log(`Time: ${progress.timemark}`);
+          }
         })
         .on('end', () => {
-          console.log('Conversion completed');
+          console.log('Conversion completed successfully');
           resolve();
         })
         .on('error', (err) => {
           console.error('FFmpeg error:', err);
+          console.error('Error message:', err.message);
           reject(err);
         })
         .run();
@@ -133,9 +145,16 @@ app.post('/convert', upload.single('video'), async (req, res) => {
 
     // Check if temp file exists before moving
     if (await fs.pathExists(tempPath)) {
+      const tempStats = await fs.stat(tempPath);
+      console.log(`Temp file size: ${tempStats.size} bytes`);
       console.log(`Moving file from ${tempPath} to ${outputPath}`);
       await fs.move(tempPath, outputPath);
       console.log('File moved successfully');
+      
+      // Verify the final file
+      const finalStats = await fs.stat(outputPath);
+      console.log(`Final file size: ${finalStats.size} bytes`);
+      console.log(`Final file path: ${outputPath}`);
     } else {
       throw new Error('Converted file not found in temp directory');
     }
@@ -180,9 +199,16 @@ app.get('/download/:filename', (req, res) => {
     return res.status(404).json({ error: 'File not found' });
   }
 
+  // Get file stats for logging
+  const stats = fs.statSync(filePath);
+  console.log(`Serving file: ${filename}`);
+  console.log(`File size: ${stats.size} bytes`);
+  console.log(`File path: ${filePath}`);
+
   // Set appropriate headers
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Content-Length', stats.size);
 
   // Stream the file
   const fileStream = fs.createReadStream(filePath);
@@ -190,7 +216,13 @@ app.get('/download/:filename', (req, res) => {
 
   // Clean up file after download
   fileStream.on('end', () => {
+    console.log(`File ${filename} served successfully, cleaning up...`);
     fs.remove(filePath).catch(console.error);
+  });
+
+  fileStream.on('error', (err) => {
+    console.error(`Error streaming file ${filename}:`, err);
+    res.status(500).json({ error: 'Error streaming file' });
   });
 });
 
