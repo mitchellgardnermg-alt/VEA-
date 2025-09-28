@@ -9,6 +9,10 @@ const fs = require('fs-extra');
 const path = require('path');
 
 const app = express();
+
+// Add this line right after creating the app
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 3000;
 
 // Security middleware
