@@ -153,42 +153,46 @@ app.post('/convert', upload.single('video'), async (req, res) => {
     const outputPath = path.join(outputDir, outputFileName);
     const tempPath = path.join(tempDir, `${uuidv4()}.mp4`);
 
-    console.log(`Converting ${req.file.originalname} to MP4...`);
+    console.log(`Converting ${req.file.originalname} to MP4 with HIGH QUALITY settings...`);
 
-    // Convert video using FFmpeg with enhanced settings
+    // Convert video using FFmpeg with HIGH QUALITY settings
     let conversionSuccess = false;
     
     try {
-      console.log('Starting conversion with fluent-ffmpeg...');
+      console.log('Starting HIGH QUALITY conversion with fluent-ffmpeg...');
       await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
           .outputOptions([
             '-c:v libx264',           // Use H.264 codec for video
             '-c:a aac',              // Use AAC codec for audio
-            '-preset fast',          // Encoding speed vs compression tradeoff
-            '-crf 23',              // Constant rate factor (quality)
+            '-preset slow',          // HIGH QUALITY encoding (slower but much better)
+            '-crf 18',              // HIGH QUALITY (18 is visually lossless, 23 was medium)
             '-movflags +faststart',  // Optimize for web streaming
             '-pix_fmt yuv420p',     // Ensure compatibility
-            '-profile:v baseline',  // Use baseline profile for compatibility
-            '-level 3.0',           // Set H.264 level
-            '-maxrate 2M',          // Maximum bitrate
-            '-bufsize 4M',          // Buffer size
+            '-profile:v high',       // High profile for better quality
+            '-level 4.1',           // Higher level for better quality
+            '-bf 2',                // B-frames for better compression
+            '-refs 4',              // Reference frames for better quality
+            '-me_method umh',       // Better motion estimation
+            '-subq 7',              // Subpixel motion estimation quality
+            '-trellis 1',           // Trellis quantization
+            '-aq-mode 2',           // Adaptive quantization
             '-f mp4'                // Force MP4 format
           ])
           .output(tempPath)
           .on('start', (commandLine) => {
-            console.log('FFmpeg process started:', commandLine);
+            console.log('HIGH QUALITY FFmpeg process started:', commandLine);
             console.log(`Input file: ${inputPath}`);
             console.log(`Output file: ${tempPath}`);
           })
           .on('progress', (progress) => {
-            console.log(`Processing: ${Math.round(progress.percent || 0)}% done`);
+            console.log(`HIGH QUALITY Processing: ${Math.round(progress.percent || 0)}% done`);
             if (progress.timemark) {
               console.log(`Time: ${progress.timemark}`);
             }
           })
           .on('end', () => {
-            console.log('Conversion completed successfully');
+            console.log('HIGH QUALITY conversion completed successfully');
             conversionSuccess = true;
             resolve();
           })
@@ -200,15 +204,15 @@ app.post('/convert', upload.single('video'), async (req, res) => {
           .run();
       });
     } catch (ffmpegError) {
-      console.log('Fluent-FFmpeg failed, trying direct FFmpeg command...');
+      console.log('Fluent-FFmpeg failed, trying direct FFmpeg command with HIGH QUALITY...');
       console.error('Fluent-FFmpeg error:', ffmpegError);
       
-      // Fallback to direct FFmpeg command
+      // Fallback to direct FFmpeg command with HIGH QUALITY settings
       try {
         await new Promise((resolve, reject) => {
-          const ffmpegCommand = `ffmpeg -i "${inputPath}" -c:v libx264 -c:a aac -preset fast -crf 23 -movflags +faststart -pix_fmt yuv420p -profile:v baseline -level 3.0 -maxrate 2M -bufsize 4M -f mp4 "${tempPath}"`;
+          const ffmpegCommand = `ffmpeg -i "${inputPath}" -c:v libx264 -c:a aac -preset slow -crf 18 -movflags +faststart -pix_fmt yuv420p -profile:v high -level 4.1 -bf 2 -refs 4 -me_method umh -subq 7 -trellis 1 -aq-mode 2 -f mp4 "${tempPath}"`;
           
-          console.log('Running direct FFmpeg command:', ffmpegCommand);
+          console.log('Running HIGH QUALITY direct FFmpeg command:', ffmpegCommand);
           
           exec(ffmpegCommand, (error, stdout, stderr) => {
             if (error) {
@@ -216,7 +220,7 @@ app.post('/convert', upload.single('video'), async (req, res) => {
               console.error('Stderr:', stderr);
               reject(error);
             } else {
-              console.log('Direct FFmpeg command succeeded');
+              console.log('HIGH QUALITY direct FFmpeg command succeeded');
               console.log('Stdout:', stdout);
               conversionSuccess = true;
               resolve();
@@ -236,28 +240,28 @@ app.post('/convert', upload.single('video'), async (req, res) => {
     // Check if temp file exists before moving
     if (await fs.pathExists(tempPath)) {
       const tempStats = await fs.stat(tempPath);
-      console.log(`Temp file size: ${tempStats.size} bytes`);
+      console.log(`HIGH QUALITY temp file size: ${tempStats.size} bytes`);
       
       // Verify the file is actually MP4 by checking file header
       const fileBuffer = await fs.readFile(tempPath, { start: 0, end: 8 });
       const fileHeader = fileBuffer.toString('hex');
-      console.log(`File header: ${fileHeader}`);
+      console.log(`HIGH QUALITY file header: ${fileHeader}`);
       
       // Check for MP4 signature (ftyp box)
       if (fileHeader.includes('66747970') || fileHeader.includes('6d6f6f76')) {
-        console.log('✅ File appears to be MP4 format');
+        console.log('✅ HIGH QUALITY file appears to be MP4 format');
       } else {
-        console.log('⚠️ File may not be MP4 format, header:', fileHeader);
+        console.log('⚠️ HIGH QUALITY file may not be MP4 format, header:', fileHeader);
       }
       
-      console.log(`Moving file from ${tempPath} to ${outputPath}`);
+      console.log(`Moving HIGH QUALITY file from ${tempPath} to ${outputPath}`);
       await fs.move(tempPath, outputPath);
-      console.log('File moved successfully');
+      console.log('HIGH QUALITY file moved successfully');
       
       // Verify the final file
       const finalStats = await fs.stat(outputPath);
-      console.log(`Final file size: ${finalStats.size} bytes`);
-      console.log(`Final file path: ${outputPath}`);
+      console.log(`HIGH QUALITY final file size: ${finalStats.size} bytes`);
+      console.log(`HIGH QUALITY final file path: ${outputPath}`);
     } else {
       throw new Error('Converted file not found in temp directory');
     }
@@ -270,15 +274,16 @@ app.post('/convert', upload.single('video'), async (req, res) => {
     
     res.json({
       success: true,
-      message: 'Video converted successfully',
+      message: 'HIGH QUALITY video converted successfully',
       downloadUrl: downloadUrl,
       originalName: req.file.originalname,
       convertedName: outputFileName,
-      fileSize: (await fs.stat(outputPath)).size
+      fileSize: (await fs.stat(outputPath)).size,
+      quality: 'HIGH QUALITY (CRF 18, Slow Preset)'
     });
 
   } catch (error) {
-    console.error('Conversion error:', error);
+    console.error('HIGH QUALITY conversion error:', error);
     
     // Clean up files on error
     if (req.file) {
@@ -286,7 +291,7 @@ app.post('/convert', upload.single('video'), async (req, res) => {
     }
     
     res.status(500).json({
-      error: 'Conversion failed',
+      error: 'HIGH QUALITY conversion failed',
       message: error.message
     });
   }
@@ -304,9 +309,9 @@ app.get('/download/:filename', (req, res) => {
 
   // Get file stats for logging
   const stats = fs.statSync(filePath);
-  console.log(`Serving file: ${filename}`);
-  console.log(`File size: ${stats.size} bytes`);
-  console.log(`File path: ${filePath}`);
+  console.log(`Serving HIGH QUALITY file: ${filename}`);
+  console.log(`HIGH QUALITY file size: ${stats.size} bytes`);
+  console.log(`HIGH QUALITY file path: ${filePath}`);
 
   // Set appropriate headers
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -319,12 +324,12 @@ app.get('/download/:filename', (req, res) => {
 
   // Clean up file after download
   fileStream.on('end', () => {
-    console.log(`File ${filename} served successfully, cleaning up...`);
+    console.log(`HIGH QUALITY file ${filename} served successfully, cleaning up...`);
     fs.remove(filePath).catch(console.error);
   });
 
   fileStream.on('error', (err) => {
-    console.error(`Error streaming file ${filename}:`, err);
+    console.error(`Error streaming HIGH QUALITY file ${filename}:`, err);
     res.status(500).json({ error: 'Error streaming file' });
   });
 });
@@ -358,18 +363,18 @@ app.use((req, res) => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Video Encoding API running on port ${PORT}`);
+  console.log(`🚀 HIGH QUALITY Video Encoding API running on port ${PORT}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`📁 Output directory: ${outputDir}`);
   console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`\n📋 Available endpoints:`);
-  console.log(`   POST /convert - Upload and convert video`);
+  console.log(`   POST /convert - Upload and convert video with HIGH QUALITY`);
   console.log(`   GET /download/:filename - Download converted file`);
   console.log(`   GET /health - Health check`);
   console.log(`\n🌐 Network Access:`);
   console.log(`   Local: http://localhost:${PORT}`);
   console.log(`   Network: http://[YOUR_IP]:${PORT}`);
-  console.log(`\n🔧 Make sure FFmpeg is installed on your system!`);
+  console.log(`\n🔧 HIGH QUALITY Settings: CRF 18, Slow Preset, High Profile`);
 });
 
 // Graceful shutdown
