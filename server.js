@@ -8,6 +8,8 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs-extra');
 const path = require('path');
 const { exec } = require('child_process');
+const RenderEngine = require('./renderEngine');
+const jobQueue = require('./jobQueue');
 
 const app = express();
 
@@ -98,6 +100,21 @@ const upload = multer({
   }
 });
 
+// Separate upload config for audio files
+const audioUpload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB limit for audio
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('audio/') || file.fieldname === 'audio') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed!'), false);
+    }
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
@@ -111,9 +128,12 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     message: 'Video Encoding API',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: {
       'POST /convert': 'Upload and convert video files',
+      'POST /render/start': 'Start video rendering job',
+      'GET /render/status/:jobId': 'Get render job status',
+      'GET /render/download/:jobId': 'Download rendered video',
       'GET /download/:filename': 'Download converted files',
       'GET /health': 'Health check',
       'GET /test-ffmpeg': 'Test FFmpeg installation'
@@ -139,6 +159,178 @@ app.get('/test-ffmpeg', (req, res) => {
       });
     }
   });
+});
+
+// Start render job endpoint
+app.post('/render/start', audioUpload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    // Parse project configuration
+    const config = JSON.parse(req.body.config || '{}');
+    
+    // Validate configuration
+    if (!config.startTime && config.startTime !== 0) {
+      return res.status(400).json({ error: 'Missing startTime in config' });
+    }
+    if (!config.endTime) {
+      return res.status(400).json({ error: 'Missing endTime in config' });
+    }
+    if (!config.layers || !Array.isArray(config.layers)) {
+      return res.status(400).json({ error: 'Missing or invalid layers in config' });
+    }
+
+    // Generate job ID
+    const jobId = uuidv4();
+    
+    // Set defaults
+    const renderConfig = {
+      startTime: config.startTime,
+      endTime: config.endTime,
+      fps: config.fps || 60,
+      width: config.width || 854,
+      height: config.height || 480,
+      layers: config.layers,
+      background: config.background || { color: '#000000' },
+      logo: config.logo || null
+    };
+
+    const duration = renderConfig.endTime - renderConfig.startTime;
+    const estimatedTime = Math.ceil(duration * 1.5); // Rough estimate: 1.5x duration
+    
+    console.log(`New render job ${jobId}: ${duration}s at ${renderConfig.fps}fps`);
+    
+    // Add job to queue
+    jobQueue.addJob(jobId, {
+      config: renderConfig,
+      audioPath: req.file.path,
+      audioFilename: req.file.originalname
+    });
+
+    // Start rendering asynchronously
+    const renderEngine = new RenderEngine(jobId, renderConfig, req.file.path);
+    
+    // Process render in background
+    (async () => {
+      try {
+        // Update job status from render engine
+        const updateInterval = setInterval(() => {
+          jobQueue.updateJob(jobId, {
+            status: renderEngine.status,
+            progress: renderEngine.progress,
+            stage: renderEngine.stage
+          });
+        }, 500);
+
+        const result = await renderEngine.render();
+        
+        clearInterval(updateInterval);
+        jobQueue.completeJob(jobId, result);
+        
+        // Clean up audio file
+        await fs.remove(req.file.path);
+        
+      } catch (error) {
+        clearInterval(updateInterval);
+        jobQueue.failJob(jobId, error.message);
+        
+        // Clean up audio file
+        await fs.remove(req.file.path).catch(() => {});
+      }
+    })();
+
+    res.json({
+      success: true,
+      jobId: jobId,
+      estimatedTime: estimatedTime,
+      message: 'Render job started'
+    });
+
+  } catch (error) {
+    console.error('Render start error:', error);
+    
+    if (req.file) {
+      await fs.remove(req.file.path).catch(() => {});
+    }
+    
+    res.status(500).json({
+      error: 'Failed to start render',
+      message: error.message
+    });
+  }
+});
+
+// Get render status endpoint
+app.get('/render/status/:jobId', (req, res) => {
+  const jobId = req.params.jobId;
+  const job = jobQueue.getJob(jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    progress: job.progress,
+    stage: job.stage,
+    error: job.error,
+    createdAt: job.createdAt,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt
+  });
+});
+
+// Download rendered video endpoint
+app.get('/render/download/:jobId', async (req, res) => {
+  const jobId = req.params.jobId;
+  const job = jobQueue.getJob(jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  
+  if (job.status !== 'completed') {
+    return res.status(400).json({ 
+      error: 'Job not completed',
+      status: job.status,
+      progress: job.progress
+    });
+  }
+  
+  const filePath = job.result.outputPath;
+  
+  if (!await fs.pathExists(filePath)) {
+    return res.status(404).json({ error: 'Rendered file not found or expired' });
+  }
+  
+  const stats = await fs.stat(filePath);
+  console.log(`Serving rendered video: ${jobId}, size: ${stats.size} bytes`);
+  
+  res.setHeader('Content-Disposition', `attachment; filename="vixa-render-${jobId}.mp4"`);
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Content-Length', stats.size);
+  
+  const fileStream = fs.createReadStream(filePath);
+  fileStream.pipe(res);
+  
+  // Clean up file after download
+  fileStream.on('end', () => {
+    console.log(`Rendered video ${jobId} downloaded, cleaning up...`);
+    fs.remove(filePath).catch(console.error);
+  });
+  
+  fileStream.on('error', (err) => {
+    console.error(`Error streaming rendered video ${jobId}:`, err);
+    res.status(500).json({ error: 'Error streaming file' });
+  });
+});
+
+// Get queue stats endpoint
+app.get('/render/stats', (req, res) => {
+  res.json(jobQueue.getStats());
 });
 
 // Convert WebM to MP4 endpoint
