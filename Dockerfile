@@ -1,8 +1,17 @@
 # Use Node.js 18 Alpine as base image
 FROM node:18-alpine
 
-# Install FFmpeg
-RUN apk add --no-cache ffmpeg
+# Install FFmpeg and build dependencies for canvas
+RUN apk add --no-cache \
+    ffmpeg \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    giflib-dev \
+    pixman-dev
 
 # Set working directory
 WORKDIR /app
@@ -11,7 +20,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copy application code
 COPY . .
