@@ -18,6 +18,20 @@ class VisualRenderer {
     return arr[i % arr.length];
   }
 
+  // Calculate shake offset based on audio data (from VIXA v3)
+  calculateShake(audioData, intensity, time) {
+    if (intensity === 0) return { x: 0, y: 0 };
+    
+    const baseShake = audioData.rms * intensity * 10;
+    const freqVariation = audioData.freq[Math.floor(Math.random() * audioData.freq.length)] / 255;
+    const timeVariation = Math.sin(time * 0.01) * 0.3;
+    
+    const shakeX = (Math.random() - 0.5) * baseShake + freqVariation * 2 + timeVariation;
+    const shakeY = (Math.random() - 0.5) * baseShake + freqVariation * 2 + timeVariation;
+    
+    return { x: shakeX, y: shakeY };
+  }
+
   async renderFrame(audioData, layers, background, logo, palettes, currentTime) {
     const ctx = this.ctx;
     const w = this.width;
@@ -29,10 +43,23 @@ class VisualRenderer {
     // Clear canvas
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Render background
+    // 1. Render background with shake effect (from VIXA v3)
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
     ctx.fillStyle = background.color || '#000000';
-    ctx.fillRect(0, 0, w, h);
+    
+    // Apply shake effect to background if enabled
+    if (background.shakeEnabled && background.shakeIntensity > 0) {
+      const shake = this.calculateShake(audioData, background.shakeIntensity, currentTime * 1000);
+      ctx.save();
+      ctx.translate(shake.x, shake.y);
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    } else {
+      ctx.fillRect(0, 0, w, h);
+    }
 
+    // Background image
     if (background.src) {
       try {
         const img = await loadImage(background.src);
@@ -43,10 +70,24 @@ class VisualRenderer {
         } else if (background.fit === 'cover') {
           const scale = Math.max(w / img.width, h / img.height);
           dw = img.width * scale; dh = img.height * scale;
+        } else {
+          // stretch
+          dw = w; dh = h;
         }
-        const dx = (w - dw) / 2, dy = (h - dh) / 2;
-        ctx.globalAlpha = background.opacity || 1;
-        ctx.drawImage(img, dx, dy, dw, dh);
+        let dx = (w - dw) / 2, dy = (h - dh) / 2;
+        
+        // Apply shake effect to background image if enabled
+        if (background.shakeEnabled && background.shakeIntensity > 0) {
+          const shake = this.calculateShake(audioData, background.shakeIntensity, currentTime * 1000);
+          ctx.save();
+          ctx.translate(shake.x, shake.y);
+          ctx.globalAlpha = background.opacity || 1;
+          ctx.drawImage(img, dx, dy, dw, dh);
+          ctx.restore();
+        } else {
+          ctx.globalAlpha = background.opacity || 1;
+          ctx.drawImage(img, dx, dy, dw, dh);
+        }
         ctx.globalAlpha = 1;
       } catch (err) {
         console.error('Background image error:', err.message);
