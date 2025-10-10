@@ -115,16 +115,26 @@ class VisualRenderer {
       ctx.globalAlpha = 1;
     }
 
-    // 3. Logo overlay
+    // 3. Logo overlay with shake effect (from VIXA v3)
     if (logo && logo.src) {
       try {
         const img = await loadImage(logo.src);
         const scale = Math.max(0.1, Math.min(2, logo.scale || 1));
         const iw = Math.min(w, h) * 0.25 * scale;
-        const x = (logo.x || 0.5) * (w - iw);
-        const y = (logo.y || 0.5) * (h - iw);
-        ctx.globalAlpha = logo.opacity || 1;
-        ctx.drawImage(img, x, y, iw, iw);
+        const ih = iw;
+        let x = (logo.x || 0.5) * (w - iw);
+        let y = (logo.y || 0.5) * (h - ih);
+        
+        // Apply shake effect to logo if enabled
+        if (logo.shakeEnabled && logo.shakeIntensity > 0) {
+          const shake = this.calculateShake(audioData, logo.shakeIntensity, currentTime * 1000);
+          x += shake.x;
+          y += shake.y;
+        }
+        
+        ctx.globalAlpha = Math.max(0, Math.min(1, logo.opacity || 1));
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(img, x, y, iw, ih);
         ctx.globalAlpha = 1;
       } catch (err) {
         console.error('Logo error:', err.message);
