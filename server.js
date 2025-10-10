@@ -161,12 +161,28 @@ app.get('/test-ffmpeg', (req, res) => {
   });
 });
 
+// Configure multer to handle multiple files (audio, backgroundImage, logoImage)
+const renderUpload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB per file
+  }
+}).fields([
+  { name: 'audio', maxCount: 1 },
+  { name: 'backgroundImage', maxCount: 1 },
+  { name: 'logoImage', maxCount: 1 }
+]);
+
 // Start render job endpoint
-app.post('/render/start', audioUpload.single('audio'), async (req, res) => {
+app.post('/render/start', renderUpload, async (req, res) => {
   try {
-    if (!req.file) {
+    if (!req.files || !req.files.audio || !req.files.audio[0]) {
       return res.status(400).json({ error: 'No audio file provided' });
     }
+
+    const audioFile = req.files.audio[0];
+    const backgroundImageFile = req.files.backgroundImage ? req.files.backgroundImage[0] : null;
+    const logoImageFile = req.files.logoImage ? req.files.logoImage[0] : null;
 
     // Parse project configuration
     const config = JSON.parse(req.body.config || '{}');
@@ -185,7 +201,7 @@ app.post('/render/start', audioUpload.single('audio'), async (req, res) => {
     // Generate job ID
     const jobId = uuidv4();
     
-    // Set defaults
+    // Set defaults and add image paths
     const renderConfig = {
       startTime: config.startTime,
       endTime: config.endTime,
@@ -193,24 +209,36 @@ app.post('/render/start', audioUpload.single('audio'), async (req, res) => {
       width: config.width || 854,
       height: config.height || 480,
       layers: config.layers,
-      background: config.background || { color: '#000000' },
-      logo: config.logo || null
+      background: {
+        ...config.background,
+        src: backgroundImageFile ? backgroundImageFile.path : null
+      },
+      logo: config.logo ? {
+        ...config.logo,
+        src: logoImageFile ? logoImageFile.path : null
+      } : null
     };
 
     const duration = renderConfig.endTime - renderConfig.startTime;
     const estimatedTime = Math.ceil(duration * 1.5); // Rough estimate: 1.5x duration
     
     console.log(`New render job ${jobId}: ${duration}s at ${renderConfig.fps}fps`);
+    console.log('Images:', {
+      background: !!backgroundImageFile,
+      logo: !!logoImageFile
+    });
     
     // Add job to queue
     jobQueue.addJob(jobId, {
       config: renderConfig,
-      audioPath: req.file.path,
-      audioFilename: req.file.originalname
+      audioPath: audioFile.path,
+      audioFilename: audioFile.originalname,
+      backgroundImagePath: backgroundImageFile?.path,
+      logoImagePath: logoImageFile?.path
     });
 
     // Start rendering asynchronously
-    const renderEngine = new RenderEngine(jobId, renderConfig, req.file.path);
+    const renderEngine = new RenderEngine(jobId, renderConfig, audioFile.path);
     
     // Process render in background
     (async () => {
@@ -229,15 +257,19 @@ app.post('/render/start', audioUpload.single('audio'), async (req, res) => {
         clearInterval(updateInterval);
         jobQueue.completeJob(jobId, result);
         
-        // Clean up audio file
-        await fs.remove(req.file.path);
+        // Clean up uploaded files
+        await fs.remove(audioFile.path).catch(() => {});
+        if (backgroundImageFile) await fs.remove(backgroundImageFile.path).catch(() => {});
+        if (logoImageFile) await fs.remove(logoImageFile.path).catch(() => {});
         
       } catch (error) {
         clearInterval(updateInterval);
         jobQueue.failJob(jobId, error.message);
         
-        // Clean up audio file
-        await fs.remove(req.file.path).catch(() => {});
+        // Clean up uploaded files
+        await fs.remove(audioFile.path).catch(() => {});
+        if (backgroundImageFile) await fs.remove(backgroundImageFile.path).catch(() => {});
+        if (logoImageFile) await fs.remove(logoImageFile.path).catch(() => {});
       }
     })();
 
@@ -251,8 +283,11 @@ app.post('/render/start', audioUpload.single('audio'), async (req, res) => {
   } catch (error) {
     console.error('Render start error:', error);
     
-    if (req.file) {
-      await fs.remove(req.file.path).catch(() => {});
+    // Clean up any uploaded files on error
+    if (req.files) {
+      if (req.files.audio) await fs.remove(req.files.audio[0].path).catch(() => {});
+      if (req.files.backgroundImage) await fs.remove(req.files.backgroundImage[0].path).catch(() => {});
+      if (req.files.logoImage) await fs.remove(req.files.logoImage[0].path).catch(() => {});
     }
     
     res.status(500).json({

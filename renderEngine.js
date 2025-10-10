@@ -70,7 +70,8 @@ class RenderEngine {
           layers,
           this.config.background,
           this.config.logo,
-          palettes
+          palettes,
+          frameData.time // Pass current time for animations
         );
         
         // Save frame

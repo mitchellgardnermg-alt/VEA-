@@ -18,22 +18,6 @@ class VisualRenderer {
     return arr[i % arr.length];
   }
 
-  /**
-   * Calculate shake offset based on audio data (from VIXA)
-   */
-  calculateShake(audioData, intensity, time) {
-    if (intensity === 0) return { x: 0, y: 0 };
-    
-    const baseShake = audioData.rms * intensity * 10;
-    const freqVariation = audioData.freq[Math.floor(Math.random() * audioData.freq.length)] / 255;
-    const timeVariation = Math.sin(time * 0.01) * 0.3;
-    
-    const shakeX = (Math.random() - 0.5) * baseShake + freqVariation * 2 + timeVariation;
-    const shakeY = (Math.random() - 0.5) * baseShake + freqVariation * 2 + timeVariation;
-    
-    return { x: shakeX, y: shakeY };
-  }
-
   async renderFrame(audioData, layers, background, logo, palettes, currentTime) {
     const ctx = this.ctx;
     const w = this.width;
@@ -45,23 +29,10 @@ class VisualRenderer {
     // Clear canvas
     ctx.clearRect(0, 0, w, h);
 
-    // 1. Render background with shake effect (from VIXA v3)
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
+    // 1. Render background
     ctx.fillStyle = background.color || '#000000';
-    
-    // Apply shake effect to background if enabled
-    if (background.shakeEnabled && background.shakeIntensity > 0) {
-      const shake = this.calculateShake(audioData, background.shakeIntensity, currentTime * 1000);
-      ctx.save();
-      ctx.translate(shake.x, shake.y);
-      ctx.fillRect(0, 0, w, h);
-      ctx.restore();
-    } else {
-      ctx.fillRect(0, 0, w, h);
-    }
+    ctx.fillRect(0, 0, w, h);
 
-    // Background image
     if (background.src) {
       try {
         const img = await loadImage(background.src);
@@ -72,24 +43,10 @@ class VisualRenderer {
         } else if (background.fit === 'cover') {
           const scale = Math.max(w / img.width, h / img.height);
           dw = img.width * scale; dh = img.height * scale;
-        } else {
-          // stretch
-          dw = w; dh = h;
         }
-        let dx = (w - dw) / 2, dy = (h - dh) / 2;
-        
-        // Apply shake effect to background image if enabled
-        if (background.shakeEnabled && background.shakeIntensity > 0) {
-          const shake = this.calculateShake(audioData, background.shakeIntensity, currentTime * 1000);
-          ctx.save();
-          ctx.translate(shake.x, shake.y);
-          ctx.globalAlpha = background.opacity || 1;
-          ctx.drawImage(img, dx, dy, dw, dh);
-          ctx.restore();
-        } else {
-          ctx.globalAlpha = background.opacity || 1;
-          ctx.drawImage(img, dx, dy, dw, dh);
-        }
+        const dx = (w - dw) / 2, dy = (h - dh) / 2;
+        ctx.globalAlpha = background.opacity || 1;
+        ctx.drawImage(img, dx, dy, dw, dh);
         ctx.globalAlpha = 1;
       } catch (err) {
         console.error('Background image error:', err.message);
@@ -111,52 +68,22 @@ class VisualRenderer {
         default: ctx.globalCompositeOperation = 'source-over'; break;
       }
 
-      // Apply mirror transformations if enabled
-      if (layer.mirrored || layer.mirroredVertical) {
-        ctx.save();
-        if (layer.mirrored && layer.mirroredVertical) {
-          ctx.scale(-1, -1);
-          ctx.translate(-w, -h);
-        } else if (layer.mirrored) {
-          ctx.scale(-1, 1);
-          ctx.translate(-w, 0);
-        } else if (layer.mirroredVertical) {
-          ctx.scale(1, -1);
-          ctx.translate(0, -h);
-        }
-      }
-
       this.renderVisualMode(layer, freq, wave, rms, colors);
-      
-      // Restore transform if mirrored
-      if (layer.mirrored || layer.mirroredVertical) {
-        ctx.restore();
-      }
       
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     }
 
-    // 3. Logo overlay with shake effect (from VIXA v3)
+    // 3. Logo overlay
     if (logo && logo.src) {
       try {
         const img = await loadImage(logo.src);
         const scale = Math.max(0.1, Math.min(2, logo.scale || 1));
         const iw = Math.min(w, h) * 0.25 * scale;
-        const ih = iw;
-        let x = (logo.x || 0.5) * (w - iw);
-        let y = (logo.y || 0.5) * (h - ih);
-        
-        // Apply shake effect to logo if enabled
-        if (logo.shakeEnabled && logo.shakeIntensity > 0) {
-          const shake = this.calculateShake(audioData, logo.shakeIntensity, currentTime * 1000);
-          x += shake.x;
-          y += shake.y;
-        }
-        
-        ctx.globalAlpha = Math.max(0, Math.min(1, logo.opacity || 1));
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(img, x, y, iw, ih);
+        const x = (logo.x || 0.5) * (w - iw);
+        const y = (logo.y || 0.5) * (h - iw);
+        ctx.globalAlpha = logo.opacity || 1;
+        ctx.drawImage(img, x, y, iw, iw);
         ctx.globalAlpha = 1;
       } catch (err) {
         console.error('Logo error:', err.message);
@@ -487,105 +414,16 @@ class VisualRenderer {
 
   renderSmokeAdvanced(freq, colors) {
     const w = this.width, h = this.height;
-    const ctx = this.ctx;
-    const time = this.frameTime * 0.001;
-    const cacheKey = 'smoke_offscreen';
-
-    // Audio reactivity
-    const bass = (freq[2] || 0) / 255;
-    const mids = (freq[32] || 0) / 255;
-    const highs = (freq[96] || 0) / 255;
-
-    // Two palette colors to blend smoke between
-    const c1Hex = this.pick(colors, 1);
-    const c2Hex = this.pick(colors, 3);
-    const c1r = parseInt(c1Hex.slice(1, 3), 16), c1g = parseInt(c1Hex.slice(3, 5), 16), c1b = parseInt(c1Hex.slice(5, 7), 16);
-    const c2r = parseInt(c2Hex.slice(1, 3), 16), c2g = parseInt(c2Hex.slice(3, 5), 16), c2b = parseInt(c2Hex.slice(5, 7), 16);
-
-    // Maintain offscreen cache
-    if (!this.layerCache.has(cacheKey)) {
-      const scaleDown = 4; // render at quarter res for performance
-      const ow = Math.max(160, Math.floor(w / scaleDown));
-      const oh = Math.max(90, Math.floor(h / scaleDown));
-      const off = createCanvas(ow, oh);
-      const octx = off.getContext('2d');
-      this.layerCache.set(cacheKey, { off, octx, frame: 0, ow, oh });
+    for (let i = 0; i < freq.length; i += 2) {
+      const x = (i / freq.length) * w;
+      const v = freq[i] / 255;
+      const y = h - v * h * 0.8;
+      const size = 2 + v * 4;
+      this.ctx.fillStyle = this.pick(colors, Math.floor(i / 10) % colors.length);
+      this.ctx.globalAlpha = 0.3 + v * 0.4;
+      this.ctx.fillRect(x - size / 2, y, size, h - y);
     }
-
-    const cache = this.layerCache.get(cacheKey);
-    cache.frame++;
-
-    // Compute parameters
-    const density = 0.55 + bass * 0.45;
-    const baseScale = 0.008 + mids * 0.004;
-    const flow = time * (0.5 + bass * 1.2);
-    const swirlX = 0.8 + highs * 1.2;
-    const swirlY = 0.6 + highs * 1.0;
-
-    const octx = cache.octx;
-    const ow = cache.ow;
-    const oh = cache.oh;
-
-    // Update offscreen pixels every 2 frames for performance
-    if ((cache.frame % 2) === 0) {
-      const imgData = octx.createImageData(ow, oh);
-      const data = imgData.data;
-
-      // Noise functions
-      const seed = Math.sin(time * 0.15) * 10000;
-      const hash = (x, y) => {
-        const s = Math.sin(x * 127.1 + y * 311.7 + seed) * 43758.5453;
-        return s - Math.floor(s);
-      };
-      const noise = (x, y) => {
-        const xi = Math.floor(x), yi = Math.floor(y);
-        const xf = x - xi, yf = y - yi;
-        const u = xf * xf * (3 - 2 * xf);
-        const v = yf * yf * (3 - 2 * yf);
-        const n00 = hash(xi, yi), n10 = hash(xi + 1, yi), n01 = hash(xi, yi + 1), n11 = hash(xi + 1, yi + 1);
-        const nx0 = n00 * (1 - u) + n10 * u;
-        const nx1 = n01 * (1 - u) + n11 * u;
-        return nx0 * (1 - v) + nx1 * v;
-      };
-      const fbm = (x, y) => {
-        let value = 0, amp = 0.5, f = 1.0;
-        for (let i = 0; i < 3; i++) {
-          value += amp * noise(x * f, y * f);
-          f *= 2.0;
-          amp *= 0.5;
-        }
-        return value;
-      };
-
-      let idx = 0;
-      for (let y = 0; y < oh; y++) {
-        const yy = (y + Math.cos((y + flow * 60) * 0.01) * (8 * swirlY));
-        for (let x = 0; x < ow; x++) {
-          const xx = (x + Math.sin((x - flow * 50) * 0.01) * (10 * swirlX));
-          const n = fbm(xx * baseScale, yy * baseScale);
-          const v = Math.pow(n, 1.35) * (0.7 + mids * 0.5);
-          const t = Math.min(1, Math.max(0, v));
-          const r = Math.floor(c1r * (1 - t) + c2r * t);
-          const g = Math.floor(c1g * (1 - t) + c2g * t);
-          const b = Math.floor(c1b * (1 - t) + c2b * t);
-          const a = Math.floor(255 * density);
-          data[idx++] = r; data[idx++] = g; data[idx++] = b; data[idx++] = a;
-        }
-      }
-      octx.putImageData(imgData, 0, 0);
-    }
-
-    // Draw scaled with high quality smoothing and blur
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    
-    // Note: Canvas in Node.js doesn't support filter property, so we skip the blur
-    // The noise algorithm itself provides smooth edges
-    ctx.drawImage(cache.off, 0, 0, w, h);
-    
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    this.ctx.globalAlpha = 1;
   }
 
   renderSpiral(freq, colors) {
