@@ -414,68 +414,105 @@ class VisualRenderer {
 
   renderSmokeAdvanced(freq, colors) {
     const w = this.width, h = this.height;
-    const cacheKey = 'smoke_particles';
+    const ctx = this.ctx;
     const time = this.frameTime * 0.001;
-    
-    // Initialize smoke particles if not exists
+    const cacheKey = 'smoke_offscreen';
+
+    // Audio reactivity
+    const bass = (freq[2] || 0) / 255;
+    const mids = (freq[32] || 0) / 255;
+    const highs = (freq[96] || 0) / 255;
+
+    // Two palette colors to blend smoke between
+    const c1Hex = this.pick(colors, 1);
+    const c2Hex = this.pick(colors, 3);
+    const c1r = parseInt(c1Hex.slice(1, 3), 16), c1g = parseInt(c1Hex.slice(3, 5), 16), c1b = parseInt(c1Hex.slice(5, 7), 16);
+    const c2r = parseInt(c2Hex.slice(1, 3), 16), c2g = parseInt(c2Hex.slice(3, 5), 16), c2b = parseInt(c2Hex.slice(5, 7), 16);
+
+    // Maintain offscreen cache
     if (!this.layerCache.has(cacheKey)) {
-      const particles = [];
-      for (let i = 0; i < 200; i++) {
-        particles.push({
-          x: Math.random() * w,
-          y: h + Math.random() * 100,
-          vx: (Math.random() - 0.5) * 50,
-          vy: -(Math.random() * 100 + 50),
-          size: Math.random() * 40 + 20,
-          life: Math.random(),
-          maxLife: Math.random() * 2 + 1,
-          color: this.pick(colors, Math.floor(Math.random() * colors.length))
-        });
-      }
-      this.layerCache.set(cacheKey, particles);
+      const scaleDown = 4; // render at quarter res for performance
+      const ow = Math.max(160, Math.floor(w / scaleDown));
+      const oh = Math.max(90, Math.floor(h / scaleDown));
+      const off = createCanvas(ow, oh);
+      const octx = off.getContext('2d');
+      this.layerCache.set(cacheKey, { off, octx, frame: 0, ow, oh });
     }
-    
-    const particles = this.layerCache.get(cacheKey);
-    
-    // Update and render particles
-    particles.forEach((p, i) => {
-      // Update particle based on audio
-      const freqIndex = Math.floor((i / particles.length) * freq.length);
-      const intensity = (freq[freqIndex] || 0) / 255;
-      
-      p.life += 0.016;
-      p.y += p.vy * 0.016 * (1 + intensity);
-      p.x += p.vx * 0.016 + Math.sin(time + i) * 20 * 0.016;
-      p.size += intensity * 10 * 0.016;
-      
-      // Reset particle if it's gone
-      if (p.life > p.maxLife || p.y < -p.size) {
-        p.x = Math.random() * w;
-        p.y = h + Math.random() * 100;
-        p.vx = (Math.random() - 0.5) * 50;
-        p.vy = -(Math.random() * 100 + 50);
-        p.size = Math.random() * 40 + 20;
-        p.life = 0;
-        p.maxLife = Math.random() * 2 + 1;
-        p.color = this.pick(colors, Math.floor(Math.random() * colors.length));
+
+    const cache = this.layerCache.get(cacheKey);
+    cache.frame++;
+
+    // Compute parameters
+    const density = 0.55 + bass * 0.45;
+    const baseScale = 0.008 + mids * 0.004;
+    const flow = time * (0.5 + bass * 1.2);
+    const swirlX = 0.8 + highs * 1.2;
+    const swirlY = 0.6 + highs * 1.0;
+
+    const octx = cache.octx;
+    const ow = cache.ow;
+    const oh = cache.oh;
+
+    // Update offscreen pixels every 2 frames for performance
+    if ((cache.frame % 2) === 0) {
+      const imgData = octx.createImageData(ow, oh);
+      const data = imgData.data;
+
+      // Noise functions
+      const seed = Math.sin(time * 0.15) * 10000;
+      const hash = (x, y) => {
+        const s = Math.sin(x * 127.1 + y * 311.7 + seed) * 43758.5453;
+        return s - Math.floor(s);
+      };
+      const noise = (x, y) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        const xf = x - xi, yf = y - yi;
+        const u = xf * xf * (3 - 2 * xf);
+        const v = yf * yf * (3 - 2 * yf);
+        const n00 = hash(xi, yi), n10 = hash(xi + 1, yi), n01 = hash(xi, yi + 1), n11 = hash(xi + 1, yi + 1);
+        const nx0 = n00 * (1 - u) + n10 * u;
+        const nx1 = n01 * (1 - u) + n11 * u;
+        return nx0 * (1 - v) + nx1 * v;
+      };
+      const fbm = (x, y) => {
+        let value = 0, amp = 0.5, f = 1.0;
+        for (let i = 0; i < 3; i++) {
+          value += amp * noise(x * f, y * f);
+          f *= 2.0;
+          amp *= 0.5;
+        }
+        return value;
+      };
+
+      let idx = 0;
+      for (let y = 0; y < oh; y++) {
+        const yy = (y + Math.cos((y + flow * 60) * 0.01) * (8 * swirlY));
+        for (let x = 0; x < ow; x++) {
+          const xx = (x + Math.sin((x - flow * 50) * 0.01) * (10 * swirlX));
+          const n = fbm(xx * baseScale, yy * baseScale);
+          const v = Math.pow(n, 1.35) * (0.7 + mids * 0.5);
+          const t = Math.min(1, Math.max(0, v));
+          const r = Math.floor(c1r * (1 - t) + c2r * t);
+          const g = Math.floor(c1g * (1 - t) + c2g * t);
+          const b = Math.floor(c1b * (1 - t) + c2b * t);
+          const a = Math.floor(255 * density);
+          data[idx++] = r; data[idx++] = g; data[idx++] = b; data[idx++] = a;
+        }
       }
-      
-      // Render smoke particle with gradient
-      const lifeRatio = p.life / p.maxLife;
-      const alpha = (1 - lifeRatio) * 0.6;
-      
-      const gradient = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-      gradient.addColorStop(0, p.color + Math.floor(alpha * 255).toString(16).padStart(2, '0'));
-      gradient.addColorStop(0.5, p.color + Math.floor(alpha * 0.5 * 255).toString(16).padStart(2, '0'));
-      gradient.addColorStop(1, p.color + '00');
-      
-      this.ctx.fillStyle = gradient;
-      this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      this.ctx.fill();
-    });
+      octx.putImageData(imgData, 0, 0);
+    }
+
+    // Draw scaled with high quality smoothing and blur
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     
-    this.ctx.globalAlpha = 1;
+    // Note: Canvas in Node.js doesn't support filter property, so we skip the blur
+    // The noise algorithm itself provides smooth edges
+    ctx.drawImage(cache.off, 0, 0, w, h);
+    
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   renderSpiral(freq, colors) {
