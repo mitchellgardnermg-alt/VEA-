@@ -79,7 +79,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 500 * 1024 * 1024 // 500MB limit
+    fileSize: Infinity // No file size limit for Vixa Studios
   },
   fileFilter: (req, file, cb) => {
     // Check if file is a video
@@ -95,7 +95,7 @@ const upload = multer({
 const audioUpload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit for audio
+    fileSize: Infinity // No file size limit for Vixa Studios
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('audio/') || file.fieldname === 'audio') {
@@ -118,13 +118,23 @@ app.get('/health', (req, res) => {
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    message: 'Video Encoding API',
+    message: 'Video Encoding API - Vixa Studios Exclusive',
     version: '2.0.0',
+    phase: 'Phase 1 - Unlimited',
+    maxConcurrent: 10,
+    limits: {
+      fileSize: 'Unlimited',
+      queueLength: 'Unlimited',
+      requests: 'Unlimited'
+    },
     endpoints: {
       'POST /convert': 'Upload and convert video files',
       'POST /render/start': 'Start video rendering job',
       'GET /render/status/:jobId': 'Get render job status',
+      'GET /render/position/:jobId': 'Get job queue position',
       'GET /render/download/:jobId': 'Download rendered video',
+      'GET /render/stats': 'Get queue statistics',
+      'GET /render/queue': 'Get detailed queue status with server health',
       'GET /download/:filename': 'Download converted files',
       'GET /health': 'Health check',
       'GET /test-ffmpeg': 'Test FFmpeg installation'
@@ -156,7 +166,7 @@ app.get('/test-ffmpeg', (req, res) => {
 const renderUpload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB per file
+    fileSize: Infinity // No file size limit for Vixa Studios
   }
 }).fields([
   { name: 'audio', maxCount: 1 },
@@ -357,6 +367,42 @@ app.get('/render/download/:jobId', async (req, res) => {
 // Get queue stats endpoint
 app.get('/render/stats', (req, res) => {
   res.json(jobQueue.getStats());
+});
+
+// Get detailed queue status with server health
+app.get('/render/queue', (req, res) => {
+  const stats = jobQueue.getStats();
+  const memStats = jobQueue.getMemoryStats();
+  const queueStatus = {
+    ...stats,
+    serverHealth: {
+      uptime: process.uptime(),
+      memory: memStats,
+      cpu: process.cpuUsage()
+    }
+  };
+  res.json(queueStatus);
+});
+
+// Get queue position for a specific job
+app.get('/render/position/:jobId', (req, res) => {
+  const jobId = req.params.jobId;
+  const job = jobQueue.getJob(jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  
+  const stats = jobQueue.getStats();
+  const position = jobQueue.queue.indexOf(jobId) + 1;
+  
+  res.json({
+    jobId: job.id,
+    status: job.status,
+    queuePosition: position > 0 ? position : null,
+    estimatedWaitTime: position > 0 ? position * 30 : 0, // 30s avg per job
+    stats: stats
+  });
 });
 
 // Convert WebM to MP4 endpoint
@@ -564,7 +610,7 @@ app.use((error, req, res, next) => {
   
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'File too large. Maximum size is 500MB.' });
+      return res.status(400).json({ error: 'File too large.' });
     }
   }
   

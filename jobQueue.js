@@ -151,18 +151,58 @@ class JobQueue {
       queued: this.queue.length,
       processing: this.processing.size,
       completed: Array.from(this.jobs.values()).filter(j => j.status === 'completed').length,
-      failed: Array.from(this.jobs.values()).filter(j => j.status === 'failed').length
+      failed: Array.from(this.jobs.values()).filter(j => j.status === 'failed').length,
+      maxConcurrent: this.maxConcurrent,
+      availableSlots: Math.max(0, this.maxConcurrent - this.processing.size)
     };
+  }
+
+  /**
+   * Get memory usage stats
+   */
+  getMemoryStats() {
+    const used = process.memoryUsage();
+    return {
+      heapUsed: Math.round(used.heapUsed / 1024 / 1024) + 'MB',
+      heapTotal: Math.round(used.heapTotal / 1024 / 1024) + 'MB',
+      rss: Math.round(used.rss / 1024 / 1024) + 'MB',
+      external: Math.round(used.external / 1024 / 1024) + 'MB'
+    };
+  }
+
+  /**
+   * Check if system can handle more jobs
+   * For Vixa Studios - no limits, always accepts jobs
+   */
+  canAcceptJob() {
+    // No limits for Vixa Studios - always accept jobs
+    // System will scale as needed
+    return true;
   }
 }
 
 // Singleton instance
-const jobQueue = new JobQueue(2); // Max 2 concurrent renders
+const jobQueue = new JobQueue(10); // Max 10 concurrent renders
 
-// Clean up old jobs every 10 minutes
+// Clean up old jobs every 5 minutes (more aggressive)
 setInterval(() => {
   jobQueue.cleanupOldJobs();
-}, 10 * 60 * 1000);
+  console.log('Job cleanup complete. Memory:', jobQueue.getMemoryStats());
+}, 5 * 60 * 1000);
+
+// Manual garbage collection every 2 minutes if available
+setInterval(() => {
+  if (global.gc) {
+    global.gc();
+    console.log('Manual garbage collection triggered. Memory:', jobQueue.getMemoryStats());
+  }
+}, 2 * 60 * 1000);
 
 module.exports = jobQueue;
+
+
+
+
+
+
 
