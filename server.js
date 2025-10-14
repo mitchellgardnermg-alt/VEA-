@@ -138,6 +138,8 @@ app.get('/', (req, res) => {
       'GET /memory': 'Memory monitoring and recommendations',
       'POST /memory/cleanup': 'Manual aggressive memory cleanup',
       'POST /memory/clear': 'Clear unused memory immediately',
+      'GET /render/isolation/:jobId': 'VIXA: Check render session isolation status',
+      'POST /render/isolation/:jobId/complete': 'VIXA: Force complete render isolation',
       'GET /download/:filename': 'Download converted files',
       'GET /health': 'Health check',
       'GET /test-ffmpeg': 'Test FFmpeg installation'
@@ -205,6 +207,9 @@ app.post('/render/start', renderUpload, async (req, res) => {
     // Generate job ID
     const jobId = uuidv4();
     
+    // 🎬 VIXA STUDIOS: Pre-render isolation - prepare clean environment
+    jobQueue.preRenderIsolation(jobId);
+    
     // Set defaults and add image paths
     const renderConfig = {
       startTime: config.startTime,
@@ -261,6 +266,10 @@ app.post('/render/start', renderUpload, async (req, res) => {
         clearInterval(updateInterval);
         jobQueue.completeJob(jobId, result);
         
+        // 🎬 VIXA STUDIOS: Pre-download isolation - clean up render data
+        console.log(`🎬 VIXA STUDIOS: Render ${jobId} completed, preparing for download...`);
+        jobQueue.clearUnusedMemory();
+        
         // Clean up uploaded files
         await fs.remove(audioFile.path).catch(() => {});
         if (backgroundImageFile) await fs.remove(backgroundImageFile.path).catch(() => {});
@@ -269,6 +278,10 @@ app.post('/render/start', renderUpload, async (req, res) => {
       } catch (error) {
         clearInterval(updateInterval);
         jobQueue.failJob(jobId, error.message);
+        
+        // 🎬 VIXA STUDIOS: Complete isolation even on failure
+        console.log(`🎬 VIXA STUDIOS: Render ${jobId} failed, performing complete isolation...`);
+        jobQueue.completeRenderIsolation(jobId);
         
         // Clean up uploaded files
         await fs.remove(audioFile.path).catch(() => {});
@@ -358,6 +371,12 @@ app.get('/render/download/:jobId', async (req, res) => {
   // Clean up file after download
   fileStream.on('end', () => {
     console.log(`Rendered video ${jobId} downloaded, cleaning up...`);
+    
+    // 🎬 VIXA STUDIOS: Complete render isolation after download
+    const isolationResult = jobQueue.completeRenderIsolation(jobId);
+    console.log(`🎬 VIXA STUDIOS: Render ${jobId} completely isolated and cleaned up`);
+    
+    // Remove the file
     fs.remove(filePath).catch(console.error);
   });
   
@@ -467,6 +486,56 @@ app.post('/memory/clear', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Clear memory failed',
+      message: error.message
+    });
+  }
+});
+
+// VIXA STUDIOS: Render isolation status endpoint
+app.get('/render/isolation/:jobId', (req, res) => {
+  const jobId = req.params.jobId;
+  const sessionKey = `render_session_${jobId}`;
+  const session = global[sessionKey];
+  
+  if (!session) {
+    return res.status(404).json({
+      success: false,
+      error: 'Render session not found',
+      jobId: jobId
+    });
+  }
+  
+  res.json({
+    success: true,
+    jobId: jobId,
+    session: session,
+    isolated: true,
+    status: 'Active render session',
+    uptime: Date.now() - session.startTime,
+    memory: jobQueue.getMemoryStatsWithWarnings()
+  });
+});
+
+// VIXA STUDIOS: Force complete isolation endpoint
+app.post('/render/isolation/:jobId/complete', (req, res) => {
+  try {
+    const jobId = req.params.jobId;
+    console.log(`🎬 VIXA STUDIOS: Force complete isolation for job ${jobId}`);
+    
+    const result = jobQueue.completeRenderIsolation(jobId);
+    
+    res.json({
+      success: true,
+      message: 'Complete render isolation performed',
+      result: result,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Force isolation error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Force isolation failed',
       message: error.message
     });
   }

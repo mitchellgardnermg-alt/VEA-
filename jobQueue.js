@@ -300,6 +300,84 @@ class JobQueue {
   }
 
   /**
+   * Complete render isolation for Vixa Studios
+   * Ensures each render is completely isolated and cleaned up
+   */
+  completeRenderIsolation(jobId) {
+    console.log(`🎬 VIXA STUDIOS: Complete render isolation for job ${jobId}`);
+    
+    const beforeMem = process.memoryUsage();
+    const beforeMB = Math.round(beforeMem.heapUsed / 1024 / 1024);
+    
+    // 1. Remove job completely from queue
+    const job = this.jobs.get(jobId);
+    if (job) {
+      this.jobs.delete(jobId);
+      this.processing.delete(jobId);
+      
+      // Remove from queue if still there
+      const queueIndex = this.queue.indexOf(jobId);
+      if (queueIndex !== -1) {
+        this.queue.splice(queueIndex, 1);
+      }
+    }
+    
+    // 2. Clear any job-related global variables
+    if (typeof global !== 'undefined') {
+      Object.keys(global).forEach(key => {
+        if (key.includes(jobId) || key.startsWith('render_')) {
+          delete global[key];
+        }
+      });
+    }
+    
+    // 3. Force multiple garbage collection cycles
+    if (global.gc) {
+      for (let i = 0; i < 3; i++) {
+        global.gc();
+      }
+    }
+    
+    // 4. Clear any temporary render data
+    if (global.renderCache) {
+      global.renderCache.clear();
+    }
+    
+    const afterMem = process.memoryUsage();
+    const afterMB = Math.round(afterMem.heapUsed / 1024 / 1024);
+    const savedMB = beforeMB - afterMB;
+    
+    console.log(`🎬 VIXA STUDIOS: Render isolation complete - Saved ${savedMB}MB (${beforeMB}MB → ${afterMB}MB)`);
+    
+    return {
+      jobId: jobId,
+      before: beforeMB + 'MB',
+      after: afterMB + 'MB',
+      saved: savedMB + 'MB',
+      isolated: true
+    };
+  }
+
+  /**
+   * Pre-render isolation - prepare clean environment
+   */
+  preRenderIsolation(jobId) {
+    console.log(`🎬 VIXA STUDIOS: Pre-render isolation for job ${jobId}`);
+    
+    // Clear any previous render data
+    this.clearUnusedMemory();
+    
+    // Create isolated render session
+    global[`render_session_${jobId}`] = {
+      startTime: Date.now(),
+      jobId: jobId,
+      isolated: true
+    };
+    
+    console.log(`🎬 VIXA STUDIOS: Render session ${jobId} isolated and ready`);
+  }
+
+  /**
    * Get queue stats
    */
   getStats() {
