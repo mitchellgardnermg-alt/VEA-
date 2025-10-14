@@ -52,8 +52,9 @@ class RenderEngine {
       
       const audioAnalyzer = new AudioAnalyzer(this.audioPath, startTime, endTime);
       const audioFrames = await audioAnalyzer.analyzeAudio(fps);
+      const totalFrames = audioFrames.length; // Define totalFrames for streaming
       
-      this.updateStatus('rendering', 10, 'audio_analyzed', `Analyzed ${audioFrames.length} frames`);
+      this.updateStatus('rendering', 10, 'audio_analyzed', `Analyzed ${totalFrames} frames`);
       
       // Initialize visual renderer
       const renderer = new VisualRenderer(width, height);
@@ -266,7 +267,9 @@ class RenderEngine {
   async cleanup(cleanOutput = false) {
     try {
       // Clean up job directory (no more frames directory needed!)
+      if (this.jobDir) {
       await fs.remove(this.jobDir);
+      }
       
       // Optionally clean up output file
       if (cleanOutput && this.outputPath) {
