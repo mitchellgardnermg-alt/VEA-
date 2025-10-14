@@ -305,3 +305,14 @@ All code is ready. Just push to GitHub and Railway will deploy automatically.
 
 The VIXA app will then use server-side rendering for fast, professional-quality exports! 🚀
 
+
+
+
+
+
+
+
+
+
+
+

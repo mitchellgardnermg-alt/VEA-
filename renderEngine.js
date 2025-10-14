@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs-extra');
 const ffmpeg = require('fluent-ffmpeg');
+const { spawn } = require('child_process');
 const AudioAnalyzer = require('./audioAnalyzer');
 const VisualRenderer = require('./visualRenderer');
 const palettes = require('./palettes');
@@ -19,9 +20,9 @@ class RenderEngine {
     this.error = null;
     this.outputPath = null;
     
-    // Create job directory
+    // Create job directory (OPTIMIZED FOR STREAMING)
     this.jobDir = path.join(__dirname, 'temp', 'renders', jobId);
-    this.framesDir = path.join(this.jobDir, 'frames');
+    this.framesDir = null; // No longer needed with streaming!
     this.audioSegmentPath = path.join(this.jobDir, 'audio.wav');
   }
 
@@ -40,8 +41,8 @@ class RenderEngine {
    */
   async render() {
     try {
-      // Create directories
-      await fs.ensureDir(this.framesDir);
+      // Create directories (OPTIMIZED FOR STREAMING)
+      await fs.ensureDir(this.jobDir);
       
       this.updateStatus('rendering', 0, 'analyzing_audio', 'Analyzing audio...');
       
@@ -57,46 +58,19 @@ class RenderEngine {
       // Initialize visual renderer
       const renderer = new VisualRenderer(width, height);
       
-      this.updateStatus('rendering', 15, 'rendering_frames', 'Starting frame rendering...');
+      this.updateStatus('rendering', 15, 'rendering_frames', 'Starting streaming frame rendering...');
       
-      // Render each frame
-      const totalFrames = audioFrames.length;
-      for (let i = 0; i < totalFrames; i++) {
-        const frameData = audioFrames[i];
-        
-        // Render frame
-        await renderer.renderFrame(
-          frameData,
-          layers,
-          this.config.background,
-          this.config.logo,
-          palettes,
-          frameData.time // Pass current time for animations
-        );
-        
-        // Save frame
-        const framePath = path.join(this.framesDir, `frame-${String(i).padStart(6, '0')}.png`);
-        await renderer.saveFrame(framePath);
-        
-        // Update progress (15-75% for frame rendering)
-        const frameProgress = 15 + Math.floor((i / totalFrames) * 60);
-        if (i % Math.ceil(totalFrames / 20) === 0) {
-          this.updateStatus('rendering', frameProgress, 'rendering_frames', `Frame ${i}/${totalFrames}`);
-        }
-      }
-      
-      this.updateStatus('rendering', 75, 'frames_complete', 'All frames rendered');
-      
-      // Extract audio segment
+      // Extract audio segment first
       await audioAnalyzer.extractSegment(this.audioSegmentPath);
       
-      this.updateStatus('rendering', 80, 'encoding_video', 'Combining frames with audio...');
-      
-      // Combine frames + audio into video
+      // Set up output path
       const outputFileName = `${this.jobId}.mp4`;
       this.outputPath = path.join(__dirname, 'output', outputFileName);
       
-      await this.muxVideo(fps, this.audioSegmentPath, this.outputPath);
+      this.updateStatus('rendering', 20, 'encoding_video', 'Starting FFmpeg streaming process...');
+      
+      // Render frames with streaming to FFmpeg
+      await this.renderFramesStreaming(audioFrames, layers, fps, this.audioSegmentPath, this.outputPath);
       
       this.updateStatus('completed', 100, 'completed', 'Render complete');
       
@@ -129,7 +103,124 @@ class RenderEngine {
   }
 
   /**
-   * Combine frames and audio using FFmpeg
+   * Render frames with streaming to FFmpeg (NEW HIGH-PERFORMANCE METHOD)
+   */
+  async renderFramesStreaming(audioFrames, layers, fps, audioPath, outputPath) {
+    const renderer = new VisualRenderer(this.config.width, this.config.height);
+    const totalFrames = audioFrames.length;
+    
+    return new Promise((resolve, reject) => {
+      // Start FFmpeg process with stdin pipe for streaming
+      const ffmpegArgs = [
+        '-f', 'image2pipe',           // Read from stdin pipe
+        '-vcodec', 'png',             // Input format
+        '-r', fps.toString(),         // Frame rate
+        '-i', '-',                    // Read from stdin
+        '-i', audioPath,              // Audio input
+        '-c:v', 'libx264',            // Video codec
+        '-preset', 'fast',            // Faster encoding
+        '-crf', '23',                 // Quality setting
+        '-pix_fmt', 'yuv420p',        // Pixel format
+        '-c:a', 'aac',                // Audio codec
+        '-b:a', '192k',               // Audio bitrate
+        '-movflags', '+faststart',    // Web optimization
+        '-shortest',                  // Stop when shortest input ends
+        '-y',                         // Overwrite output file
+        outputPath
+      ];
+      
+      console.log(`🎬 VIXA STUDIOS: Starting streaming FFmpeg with args: ${ffmpegArgs.join(' ')}`);
+      
+      const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+      
+      // Handle FFmpeg process events
+      ffmpegProcess.on('error', (err) => {
+        console.error(`[${this.jobId}] FFmpeg process error:`, err);
+        reject(new Error(`FFmpeg process failed: ${err.message}`));
+      });
+      
+      ffmpegProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log(`[${this.jobId}] Streaming render completed successfully`);
+          resolve();
+        } else {
+          console.error(`[${this.jobId}] FFmpeg exited with code ${code}`);
+          reject(new Error(`FFmpeg exited with code ${code}`));
+        }
+      });
+      
+      // Handle FFmpeg stderr for progress tracking
+      let ffmpegOutput = '';
+      ffmpegProcess.stderr.on('data', (data) => {
+        ffmpegOutput += data.toString();
+        
+        // Extract progress from FFmpeg output
+        const progressMatch = ffmpegOutput.match(/frame=\s*(\d+)/);
+        if (progressMatch) {
+          const framesProcessed = parseInt(progressMatch[1]);
+          const encodingProgress = Math.min(95, 20 + Math.floor((framesProcessed / totalFrames) * 75));
+          this.updateStatus('rendering', encodingProgress, 'encoding_video', 
+            `Streaming: ${framesProcessed}/${totalFrames} frames (${Math.round((framesProcessed/totalFrames)*100)}%)`);
+        }
+      });
+      
+      // Process frames and stream to FFmpeg
+      this.processFramesStreaming(renderer, audioFrames, layers, ffmpegProcess, totalFrames)
+        .then(() => {
+          // Close stdin to signal end of frames
+          ffmpegProcess.stdin.end();
+          console.log(`[${this.jobId}] All frames streamed, closing FFmpeg stdin`);
+        })
+        .catch(err => {
+          ffmpegProcess.kill();
+          reject(err);
+        });
+    });
+  }
+  
+  /**
+   * Process frames and stream them to FFmpeg stdin
+   */
+  async processFramesStreaming(renderer, audioFrames, layers, ffmpegProcess, totalFrames) {
+    for (let i = 0; i < totalFrames; i++) {
+      const frameData = audioFrames[i];
+      
+      try {
+        // Render frame to canvas
+        await renderer.renderFrame(
+          frameData,
+          layers,
+          this.config.background,
+          this.config.logo,
+          palettes,
+          frameData.time
+        );
+        
+        // Get frame buffer and stream to FFmpeg
+        const frameBuffer = renderer.getBuffer();
+        ffmpegProcess.stdin.write(frameBuffer);
+        
+        // Update progress (20-95% for streaming)
+        const frameProgress = 20 + Math.floor((i / totalFrames) * 75);
+        if (i % Math.ceil(totalFrames / 20) === 0) {
+          this.updateStatus('rendering', frameProgress, 'rendering_frames', 
+            `Streaming frame ${i}/${totalFrames} (${Math.round((i/totalFrames)*100)}%)`);
+        }
+        
+        // Small delay to prevent overwhelming FFmpeg
+        if (i % 10 === 0) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        
+      } catch (error) {
+        console.error(`[${this.jobId}] Error processing frame ${i}:`, error);
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Combine frames and audio using FFmpeg (LEGACY METHOD - kept for fallback)
    */
   async muxVideo(fps, audioPath, outputPath) {
     return new Promise((resolve, reject) => {
@@ -170,11 +261,11 @@ class RenderEngine {
   }
 
   /**
-   * Clean up temporary files
+   * Clean up temporary files (OPTIMIZED FOR STREAMING)
    */
   async cleanup(cleanOutput = false) {
     try {
-      // Always clean up job directory
+      // Clean up job directory (no more frames directory needed!)
       await fs.remove(this.jobDir);
       
       // Optionally clean up output file
@@ -184,11 +275,11 @@ class RenderEngine {
       
       // Clear any references to free memory immediately
       this.jobDir = null;
-      this.framesDir = null;
+      this.framesDir = null; // No longer used with streaming
       this.audioSegmentPath = null;
       this.outputPath = null;
       
-      console.log(`[${this.jobId}] Cleanup complete - memory references cleared`);
+      console.log(`[${this.jobId}] 🎬 VIXA STUDIOS: Streaming cleanup complete - no PNG files to clean!`);
     } catch (error) {
       console.error(`[${this.jobId}] Cleanup error:`, error);
     }

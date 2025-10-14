@@ -16,3 +16,14 @@ const palettes = {
 
 module.exports = palettes;
 
+
+
+
+
+
+
+
+
+
+
+
