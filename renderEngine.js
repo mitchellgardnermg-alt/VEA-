@@ -87,7 +87,7 @@ class RenderEngine {
         filename: outputFileName,
         duration: duration,
         frames: totalFrames,
-        fileSize: (await fs.stat(this.outputPath)).size
+        fileSize: this.outputPath ? (await fs.stat(this.outputPath)).size : 0
       };
       
     } catch (error) {

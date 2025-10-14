@@ -251,9 +251,10 @@ app.post('/render/start', renderUpload, async (req, res) => {
     
     // Process render in background
     (async () => {
+      let updateInterval = null;
       try {
         // Update job status from render engine
-        const updateInterval = setInterval(() => {
+        updateInterval = setInterval(() => {
           jobQueue.updateJob(jobId, {
             status: renderEngine.status,
             progress: renderEngine.progress,
@@ -276,7 +277,7 @@ app.post('/render/start', renderUpload, async (req, res) => {
         if (logoImageFile) await fs.remove(logoImageFile.path).catch(() => {});
         
       } catch (error) {
-        clearInterval(updateInterval);
+        if (updateInterval) clearInterval(updateInterval);
         jobQueue.failJob(jobId, error.message);
         
         // 🎬 VIXA STUDIOS: Complete isolation even on failure
