@@ -105,6 +105,21 @@ class JobQueue {
     
     console.log(`Job ${jobId} completed. Processing: ${this.processing.size}/${this.maxConcurrent}`);
     
+    // Aggressive memory cleanup after each job
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    
+    if (heapUsedMB > 3000) { // 3GB threshold
+      console.log(`Memory cleanup after job completion: ${Math.round(heapUsedMB)}MB`);
+      this.aggressiveCleanup();
+      
+      // Force GC after cleanup
+      if (global.gc) {
+        global.gc();
+        console.log('Post-job GC triggered');
+      }
+    }
+    
     // Process next job in queue
     this.processQueue();
   }
@@ -124,6 +139,21 @@ class JobQueue {
     
     console.log(`Job ${jobId} failed: ${error}`);
     
+    // Memory cleanup after failed job too
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    
+    if (heapUsedMB > 3000) { // 3GB threshold
+      console.log(`Memory cleanup after job failure: ${Math.round(heapUsedMB)}MB`);
+      this.aggressiveCleanup();
+      
+      // Force GC after cleanup
+      if (global.gc) {
+        global.gc();
+        console.log('Post-failure GC triggered');
+      }
+    }
+    
     // Process next job in queue
     this.processQueue();
   }
@@ -133,13 +163,62 @@ class JobQueue {
    */
   cleanupOldJobs() {
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    let cleaned = 0;
     
     for (const [jobId, job] of this.jobs.entries()) {
       if (job.completedAt && job.completedAt < oneHourAgo) {
         this.jobs.delete(jobId);
-        console.log(`Cleaned up old job: ${jobId}`);
+        cleaned++;
       }
     }
+    
+    if (cleaned > 0) {
+      console.log(`Cleaned up ${cleaned} old jobs`);
+    }
+  }
+
+  /**
+   * Aggressive cleanup - remove all completed/failed jobs
+   */
+  aggressiveCleanup() {
+    let cleaned = 0;
+    
+    for (const [jobId, job] of this.jobs.entries()) {
+      if (job.status === 'completed' || job.status === 'failed') {
+        this.jobs.delete(jobId);
+        cleaned++;
+      }
+    }
+    
+    console.log(`Aggressive cleanup: removed ${cleaned} completed/failed jobs`);
+    return cleaned;
+  }
+
+  /**
+   * Get memory usage with warnings
+   */
+  getMemoryStatsWithWarnings() {
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
+    
+    const stats = {
+      heapUsed: Math.round(heapUsedMB) + 'MB',
+      heapTotal: Math.round(heapTotalMB) + 'MB',
+      rss: Math.round(memUsage.rss / 1024 / 1024) + 'MB',
+      external: Math.round(memUsage.external / 1024 / 1024) + 'MB',
+      usagePercent: Math.round((heapUsedMB / heapTotalMB) * 100) + '%'
+    };
+    
+    // Add warnings
+    if (heapUsedMB > 4000) {
+      stats.warning = `HIGH MEMORY: ${stats.heapUsed}`;
+    }
+    if (heapUsedMB > 5120) {
+      stats.critical = `CRITICAL MEMORY: ${stats.heapUsed}`;
+    }
+    
+    return stats;
   }
 
   /**
@@ -172,11 +251,24 @@ class JobQueue {
 
   /**
    * Check if system can handle more jobs
-   * For Vixa Studios - no limits, always accepts jobs
+   * For Vixa Studios - mostly unlimited, but with memory safety net
    */
   canAcceptJob() {
-    // No limits for Vixa Studios - always accept jobs
-    // System will scale as needed
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    
+    // Emergency brake: reject if memory > 6GB (80% of 8GB limit)
+    if (heapUsedMB > 6144) {
+      console.warn(`🚨 EMERGENCY: Rejecting job - memory at ${Math.round(heapUsedMB)}MB`);
+      return false;
+    }
+    
+    // Warning threshold: accept but warn if > 4GB
+    if (heapUsedMB > 4096) {
+      console.warn(`⚠️ HIGH MEMORY: Accepting job but memory at ${Math.round(heapUsedMB)}MB`);
+    }
+    
+    // For Vixa Studios - accept jobs but with memory monitoring
     return true;
   }
 }
@@ -184,21 +276,56 @@ class JobQueue {
 // Singleton instance
 const jobQueue = new JobQueue(10); // Max 10 concurrent renders
 
-// Clean up old jobs every 5 minutes (more aggressive)
+// Aggressive memory management intervals
 setInterval(() => {
   jobQueue.cleanupOldJobs();
   console.log('Job cleanup complete. Memory:', jobQueue.getMemoryStats());
-}, 5 * 60 * 1000);
+}, 3 * 60 * 1000); // Every 3 minutes
 
-// Manual garbage collection every 2 minutes if available
+// Force garbage collection every 30 seconds
 setInterval(() => {
   if (global.gc) {
     global.gc();
-    console.log('Manual garbage collection triggered. Memory:', jobQueue.getMemoryStats());
+    const memStats = jobQueue.getMemoryStats();
+    console.log('GC triggered. Memory:', memStats);
+    
+    // Warn if memory is still high after GC
+    const heapUsedMB = process.memoryUsage().heapUsed / 1024 / 1024;
+    if (heapUsedMB > 4000) { // 4GB threshold
+      console.warn(`⚠️ HIGH MEMORY USAGE: ${Math.round(heapUsedMB)}MB after GC`);
+    }
   }
-}, 2 * 60 * 1000);
+}, 30 * 1000); // Every 30 seconds
+
+// Emergency memory cleanup every 10 seconds
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+  
+  // Emergency cleanup if memory > 5GB
+  if (heapUsedMB > 5120) {
+    console.warn(`🚨 EMERGENCY: Memory at ${Math.round(heapUsedMB)}MB - forcing aggressive cleanup`);
+    
+    // Clear all completed jobs immediately
+    for (const [jobId, job] of jobQueue.jobs.entries()) {
+      if (job.status === 'completed' || job.status === 'failed') {
+        jobQueue.jobs.delete(jobId);
+      }
+    }
+    
+    // Force multiple GC cycles
+    if (global.gc) {
+      for (let i = 0; i < 3; i++) {
+        global.gc();
+      }
+    }
+    
+    console.log('Emergency cleanup complete. Memory:', jobQueue.getMemoryStats());
+  }
+}, 10 * 1000); // Every 10 seconds
 
 module.exports = jobQueue;
+
 
 
 

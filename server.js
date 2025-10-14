@@ -135,6 +135,7 @@ app.get('/', (req, res) => {
       'GET /render/download/:jobId': 'Download rendered video',
       'GET /render/stats': 'Get queue statistics',
       'GET /render/queue': 'Get detailed queue status with server health',
+      'GET /memory': 'Memory monitoring and recommendations',
       'GET /download/:filename': 'Download converted files',
       'GET /health': 'Health check',
       'GET /test-ffmpeg': 'Test FFmpeg installation'
@@ -372,7 +373,7 @@ app.get('/render/stats', (req, res) => {
 // Get detailed queue status with server health
 app.get('/render/queue', (req, res) => {
   const stats = jobQueue.getStats();
-  const memStats = jobQueue.getMemoryStats();
+  const memStats = jobQueue.getMemoryStatsWithWarnings();
   const queueStatus = {
     ...stats,
     serverHealth: {
@@ -382,6 +383,27 @@ app.get('/render/queue', (req, res) => {
     }
   };
   res.json(queueStatus);
+});
+
+// Memory monitoring endpoint
+app.get('/memory', (req, res) => {
+  const memStats = jobQueue.getMemoryStatsWithWarnings();
+  const uptime = process.uptime();
+  
+  res.json({
+    memory: memStats,
+    uptime: Math.round(uptime),
+    uptimeFormatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`,
+    gcAvailable: !!global.gc,
+    recommendations: memStats.warning ? [
+      'Memory usage is high',
+      'Consider reducing concurrent jobs',
+      'Check for memory leaks'
+    ] : [
+      'Memory usage is normal',
+      'System is healthy'
+    ]
+  });
 });
 
 // Get queue position for a specific job
