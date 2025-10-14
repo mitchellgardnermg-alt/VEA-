@@ -136,6 +136,8 @@ app.get('/', (req, res) => {
       'GET /render/stats': 'Get queue statistics',
       'GET /render/queue': 'Get detailed queue status with server health',
       'GET /memory': 'Memory monitoring and recommendations',
+      'POST /memory/cleanup': 'Manual aggressive memory cleanup',
+      'POST /memory/clear': 'Clear unused memory immediately',
       'GET /download/:filename': 'Download converted files',
       'GET /health': 'Health check',
       'GET /test-ffmpeg': 'Test FFmpeg installation'
@@ -398,12 +400,76 @@ app.get('/memory', (req, res) => {
     recommendations: memStats.warning ? [
       'Memory usage is high',
       'Consider reducing concurrent jobs',
-      'Check for memory leaks'
+      'Check for memory leaks',
+      'Try /memory/cleanup endpoint'
     ] : [
       'Memory usage is normal',
       'System is healthy'
     ]
   });
+});
+
+// Manual memory cleanup endpoint
+app.post('/memory/cleanup', (req, res) => {
+  try {
+    console.log('🧹 Manual memory cleanup triggered via API');
+    
+    // Get memory before cleanup
+    const beforeMem = jobQueue.getMemoryStatsWithWarnings();
+    
+    // Perform aggressive cleanup
+    const cleanupResult = jobQueue.aggressiveMemoryCleanup();
+    
+    // Get memory after cleanup
+    const afterMem = jobQueue.getMemoryStatsWithWarnings();
+    
+    res.json({
+      success: true,
+      message: 'Memory cleanup completed',
+      before: beforeMem,
+      after: afterMem,
+      cleanupResult: cleanupResult,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Memory cleanup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Memory cleanup failed',
+      message: error.message
+    });
+  }
+});
+
+// Clear unused memory endpoint
+app.post('/memory/clear', (req, res) => {
+  try {
+    console.log('🧹 Clear unused memory triggered via API');
+    
+    const beforeMem = jobQueue.getMemoryStatsWithWarnings();
+    
+    // Clear unused memory
+    jobQueue.clearUnusedMemory();
+    
+    const afterMem = jobQueue.getMemoryStatsWithWarnings();
+    
+    res.json({
+      success: true,
+      message: 'Unused memory cleared',
+      before: beforeMem,
+      after: afterMem,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Clear memory error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Clear memory failed',
+      message: error.message
+    });
+  }
 });
 
 // Get queue position for a specific job

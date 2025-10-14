@@ -222,6 +222,84 @@ class JobQueue {
   }
 
   /**
+   * Aggressive memory cleanup - clear everything possible
+   */
+  aggressiveMemoryCleanup() {
+    const beforeMem = process.memoryUsage();
+    const beforeMB = Math.round(beforeMem.heapUsed / 1024 / 1024);
+    
+    console.log(`🧹 Starting aggressive memory cleanup - Before: ${beforeMB}MB`);
+    
+    // 1. Clear all completed/failed jobs
+    this.aggressiveCleanup();
+    
+    // 2. Clear module cache (but keep essential modules)
+    const essentialModules = ['fs', 'path', 'crypto', 'util', 'events', 'stream'];
+    for (const moduleId in require.cache) {
+      if (!essentialModules.some(essential => moduleId.includes(essential))) {
+        delete require.cache[moduleId];
+      }
+    }
+    
+    // 3. Clear any global variables that might be holding references
+    if (global.gc) {
+      // Force multiple GC cycles
+      for (let i = 0; i < 5; i++) {
+        global.gc();
+      }
+    }
+    
+    // 4. Clear process.nextTick queue (if possible)
+    if (process._getActiveHandles) {
+      const handles = process._getActiveHandles();
+      console.log(`Active handles: ${handles.length}`);
+    }
+    
+    // 5. Clear any timers that might be holding references
+    // (We can't clear our own timers, but we can clear others)
+    
+    const afterMem = process.memoryUsage();
+    const afterMB = Math.round(afterMem.heapUsed / 1024 / 1024);
+    const savedMB = beforeMB - afterMB;
+    
+    console.log(`🧹 Aggressive cleanup complete - After: ${afterMB}MB (Saved: ${savedMB}MB)`);
+    
+    return {
+      before: beforeMB + 'MB',
+      after: afterMB + 'MB',
+      saved: savedMB + 'MB'
+    };
+  }
+
+  /**
+   * Clear all unused memory immediately
+   */
+  clearUnusedMemory() {
+    console.log('🧹 Clearing unused memory...');
+    
+    // Clear completed jobs
+    this.aggressiveCleanup();
+    
+    // Force garbage collection
+    if (global.gc) {
+      global.gc();
+      console.log('✅ Garbage collection triggered');
+    }
+    
+    // Clear any temporary variables
+    if (typeof global !== 'undefined') {
+      // Clear any global temp variables
+      Object.keys(global).forEach(key => {
+        if (key.startsWith('temp_') || key.startsWith('cache_')) {
+          delete global[key];
+        }
+      });
+    }
+    
+    console.log('✅ Unused memory cleared');
+  }
+
+  /**
    * Get queue stats
    */
   getStats() {
@@ -282,6 +360,17 @@ setInterval(() => {
   console.log('Job cleanup complete. Memory:', jobQueue.getMemoryStats());
 }, 3 * 60 * 1000); // Every 3 minutes
 
+// Deep memory cleanup every 2 minutes
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+  
+  if (heapUsedMB > 2000) { // 2GB threshold
+    console.log('🧹 Triggering deep memory cleanup...');
+    jobQueue.clearUnusedMemory();
+  }
+}, 2 * 60 * 1000); // Every 2 minutes
+
 // Force garbage collection every 30 seconds
 setInterval(() => {
   if (global.gc) {
@@ -323,6 +412,42 @@ setInterval(() => {
     console.log('Emergency cleanup complete. Memory:', jobQueue.getMemoryStats());
   }
 }, 10 * 1000); // Every 10 seconds
+
+// Memory leak detection - track memory growth over time
+let memoryHistory = [];
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+  
+  // Keep last 20 readings (2 minutes)
+  memoryHistory.push({
+    timestamp: Date.now(),
+    heapUsedMB: heapUsedMB
+  });
+  
+  if (memoryHistory.length > 20) {
+    memoryHistory.shift();
+  }
+  
+  // Detect memory leak if memory keeps growing
+  if (memoryHistory.length >= 10) {
+    const first = memoryHistory[0].heapUsedMB;
+    const last = memoryHistory[memoryHistory.length - 1].heapUsedMB;
+    const growth = last - first;
+    
+    // If memory grew by more than 500MB in 1 minute, potential leak
+    if (growth > 500) {
+      console.warn(`🚨 POTENTIAL MEMORY LEAK: Memory grew by ${Math.round(growth)}MB in 1 minute`);
+      console.warn(`Memory history: ${memoryHistory.map(m => Math.round(m.heapUsedMB)).join(', ')}MB`);
+      
+      // Trigger aggressive cleanup
+      jobQueue.aggressiveMemoryCleanup();
+      
+      // Clear history after cleanup
+      memoryHistory = [];
+    }
+  }
+}, 6 * 1000); // Every 6 seconds
 
 module.exports = jobQueue;
 

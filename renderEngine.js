@@ -100,6 +100,9 @@ class RenderEngine {
       
       this.updateStatus('completed', 100, 'completed', 'Render complete');
       
+      // Clear memory references immediately
+      this.clearMemoryReferences();
+      
       // Clean up temp files (keep output)
       await this.cleanup(false);
       
@@ -116,6 +119,10 @@ class RenderEngine {
       console.error(`[${this.jobId}] Render failed:`, error);
       this.error = error.message;
       this.updateStatus('failed', this.progress, 'failed', error.message);
+      
+      // Clear memory references even on failure
+      this.clearMemoryReferences();
+      
       await this.cleanup(true);
       throw error;
     }
@@ -175,9 +182,33 @@ class RenderEngine {
         await fs.remove(this.outputPath);
       }
       
-      console.log(`[${this.jobId}] Cleanup complete`);
+      // Clear any references to free memory immediately
+      this.jobDir = null;
+      this.framesDir = null;
+      this.audioSegmentPath = null;
+      this.outputPath = null;
+      
+      console.log(`[${this.jobId}] Cleanup complete - memory references cleared`);
     } catch (error) {
       console.error(`[${this.jobId}] Cleanup error:`, error);
+    }
+  }
+
+  /**
+   * Immediate memory cleanup during rendering
+   */
+  clearMemoryReferences() {
+    // Clear any large objects that might be holding memory
+    if (this.audioFrames) {
+      this.audioFrames = null;
+    }
+    if (this.renderer) {
+      this.renderer = null;
+    }
+    
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
     }
   }
 }
