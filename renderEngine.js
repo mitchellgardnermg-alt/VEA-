@@ -63,6 +63,16 @@ class RenderEngine {
       
       // Extract audio segment first
       await audioAnalyzer.extractSegment(this.audioSegmentPath);
+
+      // Validate audio segment exists and is non-empty
+      const audioExists = await fs.pathExists(this.audioSegmentPath);
+      if (!audioExists) {
+        throw new Error('Audio segment missing after extraction');
+      }
+      const audioStats = await fs.stat(this.audioSegmentPath);
+      if (!audioStats.size) {
+        throw new Error('Audio segment is empty');
+      }
       
       // Set up output path
       const outputFileName = `${this.jobId}.mp4`;
@@ -114,9 +124,10 @@ class RenderEngine {
       // Start FFmpeg process with stdin pipe for streaming
       const ffmpegArgs = [
         '-f', 'image2pipe',           // Read from stdin pipe
-        '-vcodec', 'png',             // Input format
-        '-r', fps.toString(),         // Frame rate
-        '-i', '-',                    // Read from stdin
+        '-vcodec', 'png',             // Input format (PNG frames)
+        '-framerate', fps.toString(), // Input framerate for image2pipe
+        '-i', '-',                    // Read frames from stdin
+        '-thread_queue_size', '1024', // Increase input queue sizes
         '-i', audioPath,              // Audio input
         '-c:v', 'libx264',            // Video codec
         '-preset', 'fast',            // Faster encoding
@@ -125,7 +136,7 @@ class RenderEngine {
         '-c:a', 'aac',                // Audio codec
         '-b:a', '192k',               // Audio bitrate
         '-movflags', '+faststart',    // Web optimization
-        '-shortest',                  // Stop when shortest input ends
+        '-r', fps.toString(),         // Output fps
         '-y',                         // Overwrite output file
         outputPath
       ];
@@ -146,6 +157,9 @@ class RenderEngine {
           resolve();
         } else {
           console.error(`[${this.jobId}] FFmpeg exited with code ${code}`);
+          if (ffmpegOutput) {
+            console.error(`[${this.jobId}] FFmpeg stderr:\n${ffmpegOutput}`);
+          }
           reject(new Error(`FFmpeg exited with code ${code}`));
         }
       });
@@ -225,9 +239,23 @@ class RenderEngine {
           throw new Error('FFmpeg process terminated unexpectedly');
         }
         
-        // Write with error handling
+        // Write with error handling and backpressure
         try {
-          ffmpegProcess.stdin.write(frameBuffer);
+          const ok = ffmpegProcess.stdin.write(frameBuffer);
+          if (!ok) {
+            await new Promise((resolve, reject) => {
+              const onDrain = () => {
+                ffmpegProcess.stdin.off('error', onError);
+                resolve();
+              };
+              const onError = (err) => {
+                ffmpegProcess.stdin.off('drain', onDrain);
+                reject(err);
+              };
+              ffmpegProcess.stdin.once('drain', onDrain);
+              ffmpegProcess.stdin.once('error', onError);
+            });
+          }
         } catch (writeError) {
           if (writeError.code === 'EPIPE') {
             throw new Error('FFmpeg process closed unexpectedly (EPIPE)');
