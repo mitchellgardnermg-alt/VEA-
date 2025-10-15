@@ -150,6 +150,22 @@ class RenderEngine {
         }
       });
       
+      // Handle stdin errors (EPIPE, etc.)
+      ffmpegProcess.stdin.on('error', (err) => {
+        console.error(`[${this.jobId}] FFmpeg stdin error:`, err);
+        if (err.code === 'EPIPE') {
+          reject(new Error('FFmpeg process closed unexpectedly (broken pipe)'));
+        } else {
+          reject(new Error(`FFmpeg stdin error: ${err.message}`));
+        }
+      });
+      
+      // Monitor process health
+      let processAlive = true;
+      ffmpegProcess.on('exit', () => {
+        processAlive = false;
+      });
+      
       // Handle FFmpeg stderr for progress tracking
       let ffmpegOutput = '';
       ffmpegProcess.stderr.on('data', (data) => {
@@ -166,14 +182,18 @@ class RenderEngine {
       });
       
       // Process frames and stream to FFmpeg
-      this.processFramesStreaming(renderer, audioFrames, layers, ffmpegProcess, totalFrames)
+      this.processFramesStreaming(renderer, audioFrames, layers, ffmpegProcess, totalFrames, () => processAlive)
         .then(() => {
           // Close stdin to signal end of frames
-          ffmpegProcess.stdin.end();
-          console.log(`[${this.jobId}] All frames streamed, closing FFmpeg stdin`);
+          if (!ffmpegProcess.stdin.destroyed) {
+            ffmpegProcess.stdin.end();
+            console.log(`[${this.jobId}] All frames streamed, closing FFmpeg stdin`);
+          }
         })
         .catch(err => {
-          ffmpegProcess.kill();
+          if (!ffmpegProcess.killed) {
+            ffmpegProcess.kill();
+          }
           reject(err);
         });
     });
@@ -182,7 +202,7 @@ class RenderEngine {
   /**
    * Process frames and stream them to FFmpeg stdin
    */
-  async processFramesStreaming(renderer, audioFrames, layers, ffmpegProcess, totalFrames) {
+  async processFramesStreaming(renderer, audioFrames, layers, ffmpegProcess, totalFrames, isProcessAlive) {
     for (let i = 0; i < totalFrames; i++) {
       const frameData = audioFrames[i];
       
@@ -199,7 +219,21 @@ class RenderEngine {
         
         // Get frame buffer and stream to FFmpeg
         const frameBuffer = renderer.getBuffer();
-        ffmpegProcess.stdin.write(frameBuffer);
+        
+        // Check if FFmpeg process is still alive before writing
+        if (!isProcessAlive() || ffmpegProcess.stdin.destroyed || ffmpegProcess.killed) {
+          throw new Error('FFmpeg process terminated unexpectedly');
+        }
+        
+        // Write with error handling
+        try {
+          ffmpegProcess.stdin.write(frameBuffer);
+        } catch (writeError) {
+          if (writeError.code === 'EPIPE') {
+            throw new Error('FFmpeg process closed unexpectedly (EPIPE)');
+          }
+          throw writeError;
+        }
         
         // Update progress (20-95% for streaming)
         const frameProgress = 20 + Math.floor((i / totalFrames) * 75);
