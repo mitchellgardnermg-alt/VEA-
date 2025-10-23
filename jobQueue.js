@@ -111,7 +111,7 @@ class JobQueue {
     
     if (heapUsedMB > 3000) { // 3GB threshold
       console.log(`Memory cleanup after job completion: ${Math.round(heapUsedMB)}MB`);
-      this.aggressiveCleanup();
+      this.cleanupFailedJobs();
       
       // Force GC after cleanup
       if (global.gc) {
@@ -145,7 +145,7 @@ class JobQueue {
     
     if (heapUsedMB > 3000) { // 3GB threshold
       console.log(`Memory cleanup after job failure: ${Math.round(heapUsedMB)}MB`);
-      this.aggressiveCleanup();
+      this.cleanupFailedJobs();
       
       // Force GC after cleanup
       if (global.gc) {
@@ -233,7 +233,7 @@ class JobQueue {
     console.log(`🧹 Starting aggressive memory cleanup - Before: ${beforeMB}MB`);
     
     // 1. Clear all completed/failed jobs
-    this.aggressiveCleanup();
+    this.cleanupFailedJobs();
     
     // 2. Clear module cache (but keep essential modules)
     const essentialModules = ['fs', 'path', 'crypto', 'util', 'events', 'stream'];
@@ -280,7 +280,7 @@ class JobQueue {
     console.log('🧹 Clearing unused memory...');
     
     // Clear completed jobs
-    this.aggressiveCleanup();
+    this.cleanupFailedJobs();
     
     // Force garbage collection
     if (global.gc) {

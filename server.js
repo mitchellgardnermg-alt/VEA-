@@ -10,6 +10,9 @@ const { exec } = require('child_process');
 const RenderEngine = require('./renderEngine');
 const jobQueue = require('./jobQueue');
 
+// Create global RenderEngine instance for job persistence
+const renderEngine = new RenderEngine();
+
 const app = express();
 
 // Add this line right after creating the app
@@ -320,7 +323,7 @@ app.get('/render/status/:jobId', async (req, res) => {
   const jobId = req.params.jobId;
   
   // Check completed jobs first (RenderEngine persistence)
-  const completedJobStatus = await RenderEngine.getJobStatus(jobId);
+  const completedJobStatus = await renderEngine.getJobStatus(jobId);
   if (completedJobStatus.status !== 'not_found') {
     return res.json({
       jobId: jobId,
