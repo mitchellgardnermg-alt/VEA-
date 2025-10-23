@@ -320,7 +320,10 @@ app.get('/render/status/:jobId', (req, res) => {
   const jobId = req.params.jobId;
   const job = jobQueue.getJob(jobId);
   
+  console.log(`🎬 VIXA STUDIOS: Status check for job ${jobId}:`, job ? `Found (${job.status})` : 'Not found');
+  
   if (!job) {
+    console.log(`🎬 VIXA STUDIOS: Job ${jobId} not found in queue. Available jobs:`, Array.from(jobQueue.jobs.keys()));
     return res.status(404).json({ error: 'Job not found' });
   }
   

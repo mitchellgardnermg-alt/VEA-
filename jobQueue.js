@@ -29,7 +29,8 @@ class JobQueue {
     this.jobs.set(jobId, job);
     this.queue.push(jobId);
     
-    console.log(`Job ${jobId} added to queue. Queue length: ${this.queue.length}`);
+    console.log(`🎬 VIXA STUDIOS: Job ${jobId} added to queue. Queue length: ${this.queue.length}`);
+    console.log(`🎬 VIXA STUDIOS: Available jobs after add:`, Array.from(this.jobs.keys()));
     
     // Try to process queue
     this.processQueue();
@@ -101,6 +102,9 @@ class JobQueue {
       job.progress = 100;
       job.completedAt = Date.now();
       job.result = result;
+      console.log(`🎬 VIXA STUDIOS: Job ${jobId} marked as completed and available for status checks`);
+    } else {
+      console.log(`🎬 VIXA STUDIOS: WARNING - Job ${jobId} not found when trying to complete!`);
     }
     
     console.log(`Job ${jobId} completed. Processing: ${this.processing.size}/${this.maxConcurrent}`);
