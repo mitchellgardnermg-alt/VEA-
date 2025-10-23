@@ -123,16 +123,18 @@ class RenderEngine {
     return new Promise((resolve, reject) => {
       // Start FFmpeg process with stdin pipe for streaming
       const ffmpegArgs = [
-        '-f', 'image2pipe',           // Read from stdin pipe
-        '-vcodec', 'png',             // Input format (PNG frames)
-        '-framerate', fps.toString(), // Input framerate for image2pipe
-        '-i', '-',                    // Read frames from stdin
+        '-loglevel', 'error',         // Lower noise; use 'info' for debugging
+        '-f', 'rawvideo',             // Read raw frames from stdin
+        '-pix_fmt', 'rgb24',          // Pixel format (canvas ImageData)
+        '-s', `${this.config.width}x${this.config.height}`, // Frame size
+        '-framerate', fps.toString(), // Input framerate
+        '-i', '-',                    // Raw frames from stdin
         '-thread_queue_size', '1024', // Increase input queue sizes
         '-i', audioPath,              // Audio input
         '-c:v', 'libx264',            // Video codec
         '-preset', 'fast',            // Faster encoding
         '-crf', '23',                 // Quality setting
-        '-pix_fmt', 'yuv420p',        // Pixel format
+        '-pix_fmt', 'yuv420p',        // Output pixel format
         '-c:a', 'aac',                // Audio codec
         '-b:a', '192k',               // Audio bitrate
         '-movflags', '+faststart',    // Web optimization
@@ -231,8 +233,9 @@ class RenderEngine {
           frameData.time
         );
         
-        // Get frame buffer and stream to FFmpeg
-        const frameBuffer = renderer.getBuffer();
+        // Get raw RGB frame buffer from canvas for rawvideo piping
+        const imageData = renderer.ctx.getImageData(0, 0, this.config.width, this.config.height);
+        const frameBuffer = Buffer.from(imageData.data);
         
         // Check if FFmpeg process is still alive before writing
         if (!isProcessAlive() || ffmpegProcess.stdin.destroyed || ffmpegProcess.killed) {
