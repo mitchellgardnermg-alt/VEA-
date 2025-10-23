@@ -2,10 +2,10 @@
   "name": "video-encoding-api",
   "version": "1.0.0",
   "description": "Self-hosted video encoding API for converting WebM to MP4",
-  "main": "server.js",
+  "main": "simple-server.js",
   "scripts": {
-    "start": "node --expose-gc --max-old-space-size=7168 server.js",
-    "dev": "nodemon --expose-gc --max-old-space-size=7168 server.js"
+    "start": "node simple-server.js",
+    "dev": "nodemon simple-server.js"
   },
   "keywords": [
     "video",
