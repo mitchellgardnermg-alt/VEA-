@@ -321,7 +321,10 @@ app.get('/render/status/:jobId', async (req, res) => {
   
   // Check completed jobs first (JobPersistence)
   const completedJobStatus = await jobPersistence.getJobStatus(jobId);
+  console.log(`🎬 VIXA STUDIOS: Status check for ${jobId}:`, completedJobStatus);
+  
   if (completedJobStatus.status !== 'not_found') {
+    console.log(`🎬 VIXA STUDIOS: Found completed job ${jobId} in JobPersistence`);
     return res.json({
       jobId: jobId,
       status: completedJobStatus.status,
@@ -354,21 +357,32 @@ app.get('/render/status/:jobId', async (req, res) => {
 // Download rendered video endpoint
 app.get('/render/download/:jobId', async (req, res) => {
   const jobId = req.params.jobId;
-  const job = jobQueue.getJob(jobId);
   
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
+  // Check completed jobs first (JobPersistence)
+  const completedJobStatus = await jobPersistence.getJobStatus(jobId);
+  let filePath = null;
+  
+  if (completedJobStatus.status !== 'not_found') {
+    console.log(`🎬 VIXA STUDIOS: Downloading from JobPersistence for ${jobId}`);
+    filePath = completedJobStatus.outputPath;
+  } else {
+    // Check active jobs in queue
+    const job = jobQueue.getJob(jobId);
+    
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    
+    if (job.status !== 'completed') {
+      return res.status(400).json({ 
+        error: 'Job not completed',
+        status: job.status,
+        progress: job.progress
+      });
+    }
+    
+    filePath = job.result.outputPath;
   }
-  
-  if (job.status !== 'completed') {
-    return res.status(400).json({ 
-      error: 'Job not completed',
-      status: job.status,
-      progress: job.progress
-    });
-  }
-  
-  const filePath = job.result.outputPath;
   
   if (!await fs.pathExists(filePath)) {
     return res.status(404).json({ error: 'Rendered file not found or expired' });
