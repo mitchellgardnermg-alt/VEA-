@@ -29,8 +29,7 @@ class JobQueue {
     this.jobs.set(jobId, job);
     this.queue.push(jobId);
     
-    console.log(`🎬 VIXA STUDIOS: Job ${jobId} added to queue. Queue length: ${this.queue.length}`);
-    console.log(`🎬 VIXA STUDIOS: Available jobs after add:`, Array.from(this.jobs.keys()));
+    console.log(`Job ${jobId} added to queue. Queue length: ${this.queue.length}`);
     
     // Try to process queue
     this.processQueue();
@@ -102,9 +101,6 @@ class JobQueue {
       job.progress = 100;
       job.completedAt = Date.now();
       job.result = result;
-      console.log(`🎬 VIXA STUDIOS: Job ${jobId} marked as completed and available for status checks`);
-    } else {
-      console.log(`🎬 VIXA STUDIOS: WARNING - Job ${jobId} not found when trying to complete!`);
     }
     
     console.log(`Job ${jobId} completed. Processing: ${this.processing.size}/${this.maxConcurrent}`);
@@ -182,27 +178,21 @@ class JobQueue {
   }
 
   /**
-   * Aggressive cleanup - remove only failed jobs and very old completed jobs
-   * Keep completed jobs until they're downloaded (VIXA Studios requirement)
+   * Cleanup failed jobs only (completed jobs handled by RenderEngine)
    */
-  aggressiveCleanup() {
+  cleanupFailedJobs() {
     let cleaned = 0;
-    const oneHourAgo = Date.now() - (60 * 60 * 1000);
     
     for (const [jobId, job] of this.jobs.entries()) {
-      // Only remove failed jobs immediately
       if (job.status === 'failed') {
-        this.jobs.delete(jobId);
-        cleaned++;
-      }
-      // Only remove completed jobs that are older than 1 hour
-      else if (job.status === 'completed' && job.completedAt && job.completedAt < oneHourAgo) {
         this.jobs.delete(jobId);
         cleaned++;
       }
     }
     
-    console.log(`Aggressive cleanup: removed ${cleaned} failed/old completed jobs (keeping recent completed jobs for download)`);
+    if (cleaned > 0) {
+      console.log(`Cleaned up ${cleaned} failed jobs`);
+    }
     return cleaned;
   }
 
@@ -311,19 +301,6 @@ class JobQueue {
     console.log('✅ Unused memory cleared');
   }
 
-  /**
-   * Remove job after successful download (VIXA Studios)
-   * This is called after the video file is downloaded
-   */
-  removeJobAfterDownload(jobId) {
-    const job = this.jobs.get(jobId);
-    if (job) {
-      this.jobs.delete(jobId);
-      console.log(`🎬 VIXA STUDIOS: Job ${jobId} removed after successful download`);
-      return true;
-    }
-    return false;
-  }
 
   /**
    * Complete render isolation for Vixa Studios

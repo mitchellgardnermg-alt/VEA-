@@ -316,14 +316,26 @@ app.post('/render/start', renderUpload, async (req, res) => {
 });
 
 // Get render status endpoint
-app.get('/render/status/:jobId', (req, res) => {
+app.get('/render/status/:jobId', async (req, res) => {
   const jobId = req.params.jobId;
+  
+  // Check completed jobs first (RenderEngine persistence)
+  const completedJobStatus = await RenderEngine.getJobStatus(jobId);
+  if (completedJobStatus.status !== 'not_found') {
+    return res.json({
+      jobId: jobId,
+      status: completedJobStatus.status,
+      progress: completedJobStatus.progress || 100,
+      stage: 'completed',
+      outputPath: completedJobStatus.outputPath,
+      completedAt: completedJobStatus.completedAt
+    });
+  }
+  
+  // Check active jobs in queue
   const job = jobQueue.getJob(jobId);
   
-  console.log(`🎬 VIXA STUDIOS: Status check for job ${jobId}:`, job ? `Found (${job.status})` : 'Not found');
-  
   if (!job) {
-    console.log(`🎬 VIXA STUDIOS: Job ${jobId} not found in queue. Available jobs:`, Array.from(jobQueue.jobs.keys()));
     return res.status(404).json({ error: 'Job not found' });
   }
   
@@ -376,11 +388,6 @@ app.get('/render/download/:jobId', async (req, res) => {
   fileStream.on('end', () => {
     console.log(`Rendered video ${jobId} downloaded, cleaning up...`);
     
-    // 🎬 VIXA STUDIOS: Remove job from queue after successful download
-    const jobRemoved = jobQueue.removeJobAfterDownload(jobId);
-    if (jobRemoved) {
-      console.log(`🎬 VIXA STUDIOS: Job ${jobId} removed from queue after download`);
-    }
     
     // 🎬 VIXA STUDIOS: Complete render isolation after download
     const isolationResult = jobQueue.completeRenderIsolation(jobId);
@@ -446,8 +453,8 @@ app.post('/memory/cleanup', (req, res) => {
     // Get memory before cleanup
     const beforeMem = jobQueue.getMemoryStatsWithWarnings();
     
-    // Perform aggressive cleanup
-    const cleanupResult = jobQueue.aggressiveMemoryCleanup();
+    // Perform cleanup (failed jobs only, completed jobs handled by RenderEngine)
+    const cleanupResult = jobQueue.cleanupFailedJobs();
     
     // Get memory after cleanup
     const afterMem = jobQueue.getMemoryStatsWithWarnings();

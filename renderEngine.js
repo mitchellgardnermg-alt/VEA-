@@ -26,6 +26,78 @@ class RenderEngine {
     this.audioSegmentPath = path.join(this.jobDir, 'audio.wav');
   }
 
+  // Static properties for job persistence (VIXA Studios)
+  static completedJobs = new Map();
+  static fileRetentionTime = 300000; // 5 minutes retention
+
+  /**
+   * Mark job as completed with file retention (VIXA Studios)
+   */
+  static async markJobCompleted(jobId, outputPath) {
+    const completedAt = Date.now();
+    const expiryTime = completedAt + RenderEngine.fileRetentionTime;
+    
+    RenderEngine.completedJobs.set(jobId, {
+      outputPath,
+      completedAt,
+      expiryTime,
+      status: 'completed'
+    });
+    
+    console.log(`✅ Job ${jobId} completed, file: ${outputPath}`);
+    console.log(`📁 File will expire at: ${new Date(expiryTime).toISOString()}`);
+    
+    // Schedule cleanup
+    setTimeout(() => {
+      RenderEngine.cleanupExpiredFile(jobId);
+    }, RenderEngine.fileRetentionTime);
+  }
+
+  /**
+   * Clean up expired file (VIXA Studios)
+   */
+  static async cleanupExpiredFile(jobId) {
+    const job = RenderEngine.completedJobs.get(jobId);
+    if (job && Date.now() > job.expiryTime) {
+      try {
+        await fs.remove(job.outputPath);
+        RenderEngine.completedJobs.delete(jobId);
+        console.log(`🗑️ Cleaned up expired file for job ${jobId}`);
+      } catch (error) {
+        console.error(`Failed to cleanup job ${jobId}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Get job status from completed jobs (VIXA Studios)
+   */
+  static async getJobStatus(jobId) {
+    const job = RenderEngine.completedJobs.get(jobId);
+    if (!job) {
+      return { status: 'not_found', error: 'Job not found or expired' };
+    }
+    
+    // Check if file still exists
+    try {
+      const exists = await fs.pathExists(job.outputPath);
+      if (!exists) {
+        RenderEngine.completedJobs.delete(jobId);
+        return { status: 'file_missing', error: 'Rendered file not found' };
+      }
+      
+      return {
+        status: job.status,
+        progress: 100,
+        outputPath: job.outputPath,
+        completedAt: job.completedAt
+      };
+    } catch (error) {
+      console.error(`Error checking job ${jobId}:`, error);
+      return { status: 'error', error: error.message };
+    }
+  }
+
   /**
    * Update job status
    */
@@ -90,6 +162,9 @@ class RenderEngine {
       
       // Clean up temp files (keep output)
       await this.cleanup(false);
+      
+      // 🎬 VIXA STUDIOS: Mark job as completed with file retention
+      await RenderEngine.markJobCompleted(this.jobId, this.outputPath);
       
       return {
         success: true,
