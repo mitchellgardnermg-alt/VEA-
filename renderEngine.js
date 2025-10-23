@@ -58,10 +58,16 @@ class JobPersistence {
    * Get job status from completed jobs (VIXA Studios)
    */
   async getJobStatus(jobId) {
+    console.log(`🔍 JobPersistence: Looking for job ${jobId}`);
+    console.log(`🔍 JobPersistence: Available jobs:`, Array.from(this.completedJobs.keys()));
+    
     const job = this.completedJobs.get(jobId);
     if (!job) {
+      console.log(`🔍 JobPersistence: Job ${jobId} not found in completed jobs`);
       return { status: 'not_found', error: 'Job not found or expired' };
     }
+    
+    console.log(`🔍 JobPersistence: Found job ${jobId}:`, job);
     
     // Check if file still exists
     try {
@@ -316,7 +322,18 @@ class RenderEngine {
         
         // Get raw RGB frame buffer from canvas for rawvideo piping
         const imageData = renderer.ctx.getImageData(0, 0, this.config.width, this.config.height);
-        const frameBuffer = Buffer.from(imageData.data);
+        
+        // Convert RGBA to RGB24 (remove alpha channel)
+        const rgbData = new Uint8Array(this.config.width * this.config.height * 3);
+        for (let i = 0; i < imageData.data.length; i += 4) {
+          const rgbIndex = (i / 4) * 3;
+          rgbData[rgbIndex] = imageData.data[i];     // R
+          rgbData[rgbIndex + 1] = imageData.data[i + 1]; // G
+          rgbData[rgbIndex + 2] = imageData.data[i + 2]; // B
+          // Skip alpha channel (i + 3)
+        }
+        
+        const frameBuffer = Buffer.from(rgbData);
         
         // Check if FFmpeg process is still alive before writing
         if (!isProcessAlive() || ffmpegProcess.stdin.destroyed || ffmpegProcess.killed) {
