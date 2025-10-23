@@ -7,28 +7,13 @@ const VisualRenderer = require('./visualRenderer');
 const palettes = require('./palettes');
 
 /**
- * Main render engine for creating videos from VIXA projects
+ * Job persistence manager for completed renders (VIXA Studios)
  */
-class RenderEngine {
-  constructor(jobId, config, audioPath) {
-    this.jobId = jobId;
-    this.config = config;
-    this.audioPath = audioPath;
-    this.status = 'queued';
-    this.progress = 0;
-    this.stage = 'initializing';
-    this.error = null;
-    this.outputPath = null;
-    
-    // Create job directory (OPTIMIZED FOR STREAMING)
-    this.jobDir = path.join(__dirname, 'temp', 'renders', jobId);
-    this.framesDir = null; // No longer needed with streaming!
-    this.audioSegmentPath = path.join(this.jobDir, 'audio.wav');
+class JobPersistence {
+  constructor() {
+    this.completedJobs = new Map();
+    this.fileRetentionTime = 300000; // 5 minutes retention
   }
-
-  // Instance properties for job persistence (VIXA Studios)
-  completedJobs = new Map();
-  fileRetentionTime = 300000; // 5 minutes retention
 
   /**
    * Mark job as completed with file retention (VIXA Studios)
@@ -97,6 +82,27 @@ class RenderEngine {
       return { status: 'error', error: error.message };
     }
   }
+}
+
+/**
+ * Main render engine for creating videos from VIXA projects
+ */
+class RenderEngine {
+  constructor(jobId, config, audioPath) {
+    this.jobId = jobId;
+    this.config = config;
+    this.audioPath = audioPath;
+    this.status = 'queued';
+    this.progress = 0;
+    this.stage = 'initializing';
+    this.error = null;
+    this.outputPath = null;
+    
+    // Create job directory (OPTIMIZED FOR STREAMING)
+    this.jobDir = path.join(__dirname, 'temp', 'renders', jobId);
+    this.framesDir = null; // No longer needed with streaming!
+    this.audioSegmentPath = path.join(this.jobDir, 'audio.wav');
+  }
 
   /**
    * Update job status
@@ -164,7 +170,7 @@ class RenderEngine {
       await this.cleanup(false);
       
       // 🎬 VIXA STUDIOS: Mark job as completed with file retention
-      await this.markJobCompleted(this.jobId, this.outputPath);
+      await jobPersistence.markJobCompleted(this.jobId, this.outputPath);
       
       return {
         success: true,
@@ -447,5 +453,8 @@ class RenderEngine {
   }
 }
 
-module.exports = RenderEngine;
+// Create global JobPersistence instance
+const jobPersistence = new JobPersistence();
+
+module.exports = { RenderEngine, jobPersistence };
 
