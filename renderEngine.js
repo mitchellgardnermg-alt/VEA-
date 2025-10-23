@@ -163,14 +163,14 @@ class RenderEngine {
       
       this.updateStatus('completed', 100, 'completed', 'Render complete');
       
+      // 🎬 VIXA STUDIOS: Mark job as completed with file retention (BEFORE cleanup)
+      await jobPersistence.markJobCompleted(this.jobId, this.outputPath);
+      
       // Clear memory references immediately
       this.clearMemoryReferences();
       
       // Clean up temp files (keep output)
       await this.cleanup(false);
-      
-      // 🎬 VIXA STUDIOS: Mark job as completed with file retention
-      await jobPersistence.markJobCompleted(this.jobId, this.outputPath);
       
       return {
         success: true,
