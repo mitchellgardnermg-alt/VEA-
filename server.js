@@ -373,6 +373,12 @@ app.get('/render/download/:jobId', async (req, res) => {
   fileStream.on('end', () => {
     console.log(`Rendered video ${jobId} downloaded, cleaning up...`);
     
+    // 🎬 VIXA STUDIOS: Remove job from queue after successful download
+    const jobRemoved = jobQueue.removeJobAfterDownload(jobId);
+    if (jobRemoved) {
+      console.log(`🎬 VIXA STUDIOS: Job ${jobId} removed from queue after download`);
+    }
+    
     // 🎬 VIXA STUDIOS: Complete render isolation after download
     const isolationResult = jobQueue.completeRenderIsolation(jobId);
     console.log(`🎬 VIXA STUDIOS: Render ${jobId} completely isolated and cleaned up`);

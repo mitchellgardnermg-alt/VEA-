@@ -178,19 +178,27 @@ class JobQueue {
   }
 
   /**
-   * Aggressive cleanup - remove all completed/failed jobs
+   * Aggressive cleanup - remove only failed jobs and very old completed jobs
+   * Keep completed jobs until they're downloaded (VIXA Studios requirement)
    */
   aggressiveCleanup() {
     let cleaned = 0;
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
     
     for (const [jobId, job] of this.jobs.entries()) {
-      if (job.status === 'completed' || job.status === 'failed') {
+      // Only remove failed jobs immediately
+      if (job.status === 'failed') {
+        this.jobs.delete(jobId);
+        cleaned++;
+      }
+      // Only remove completed jobs that are older than 1 hour
+      else if (job.status === 'completed' && job.completedAt && job.completedAt < oneHourAgo) {
         this.jobs.delete(jobId);
         cleaned++;
       }
     }
     
-    console.log(`Aggressive cleanup: removed ${cleaned} completed/failed jobs`);
+    console.log(`Aggressive cleanup: removed ${cleaned} failed/old completed jobs (keeping recent completed jobs for download)`);
     return cleaned;
   }
 
@@ -297,6 +305,20 @@ class JobQueue {
     }
     
     console.log('✅ Unused memory cleared');
+  }
+
+  /**
+   * Remove job after successful download (VIXA Studios)
+   * This is called after the video file is downloaded
+   */
+  removeJobAfterDownload(jobId) {
+    const job = this.jobs.get(jobId);
+    if (job) {
+      this.jobs.delete(jobId);
+      console.log(`🎬 VIXA STUDIOS: Job ${jobId} removed after successful download`);
+      return true;
+    }
+    return false;
   }
 
   /**
